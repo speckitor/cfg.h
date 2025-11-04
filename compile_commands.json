@@ -1,0 +1,14 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-o",
+      "example",
+      "example.c"
+    ],
+    "directory": "/home/spectr1234/programming/cfg.h",
+    "file": "/home/spectr1234/programming/cfg.h/example.c",
+    "output": "/home/spectr1234/programming/cfg.h/example"
+  }
+]
