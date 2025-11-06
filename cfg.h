@@ -23,22 +23,18 @@
  */
 
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-
-#define INITIAL_VARIABLES_NUM 32
+#include <time.h>
 
 #define MAX_NAME_LENGTH 256
 #define MAX_VALUE_LENGTH 256
 typedef enum {
     CFG_ERROR_NONE = 0,
     CFG_ERROR_OPEN_FILE,
-    CFG_ERROR_SYNTAX,
-    CFG_ERROR_VARIABLE_REDEFINITION,
-    CFG_ERROR_STACK_OVERFLOW,
-    CFG_ERROR_PARSE_VALUE,
     CFG_ERROR_COUNT,
 } Cfg_Error_Type;
 
@@ -86,65 +82,134 @@ char *cfg_get_error_message(Cfg_Config *cfg);
 
 // Private functions and types
 
+#define INIT_VARIABLES_NUM 32
+
+#define INIT_TOKENS_NUM 32
+
 typedef enum {
-    CFG_TOKEN_NONE,
-    CFG_TOKEN_EQ,
+    // Types with string literal values
+    CFG_TOKEN_EQ = 0,
     CFG_TOKEN_SEMICOLON,
+    CFG_TOKEN_EOF,
+    // Types with dinamicly allocated values
     CFG_TOKEN_IDENTIFIER,
     CFG_TOKEN_INT,
-    CFG_TOKEN_EOF,
 } Cfg_Token_Type;
 
 typedef struct {
     Cfg_Token_Type type;
-    char *token;
+    char *value;
     size_t line;
-    size_t col;
+    size_t column;
 } Cfg_Token;
 
 typedef struct {
+    char *file;
+    char *str_start;
+    char *ch_current;
     Cfg_Token *tokens;
-    Cfg_Token *current_token;
-    size_t token_len;
-    size_t token_cap;
+    size_t tokens_len;
+    size_t tokens_cap;
+    size_t line;
+    size_t column;
 } Cfg_Lexer;
 
-static char *cfg__get_file_str(Cfg_Config *cfg)
+// Private functions forward declarations
+
+static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg);
+static void cfg__lexer_free(Cfg_Lexer *lexer);
+static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value);
+
+static int cfg__file_open(Cfg_Config *cfg, const char *file_path);
+static char *cfg__file_get_str(Cfg_Config *cfg);
+static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg);
+static int cfg__file_parse(Cfg_Config *cfg);
+
+// Private functions definition
+
+static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
 {
-    fseek(cfg->file, 0, SEEK_END);
-    long size = ftell(cfg->file);
-    fseek(cfg->file, 0, SEEK_SET);
-    char *file_str = malloc(sizeof(char) * (size + 1));
-    fread(file_str, sizeof(char), size, cfg->file);
-    file_str[size] = '\0';
-    return file_str;
+    char *src = cfg__file_get_str(cfg);
+
+    Cfg_Lexer *lexer = malloc(sizeof(Cfg_Lexer)); 
+    lexer->tokens = malloc(sizeof(Cfg_Token) * INIT_TOKENS_NUM);
+
+    if (!lexer || !lexer->tokens) {
+        // TODO: add handlig error
+    }
+
+    lexer->file = src;
+    lexer->str_start = NULL;
+    lexer->ch_current = src;
+
+    lexer->tokens_len = 0;
+    lexer->tokens_cap = INIT_TOKENS_NUM;
+
+    lexer->line = 0;
+    lexer->column = 0;
+
+    return lexer;
 }
 
-static Cfg_Lexer *cfg__tokenize_file(Cfg_Config *cfg)
+static void cfg__lexer_free(Cfg_Lexer *lexer)
 {
-    // TODO
+    free(lexer->file);
+    for (int i = 0; i < lexer->tokens_len; ++i) {
+        if (lexer->tokens[i].type > CFG_TOKEN_EOF) {
+            free(lexer->tokens[i].value);
+        }
+    }
+    free(lexer->tokens);
+    free(lexer);
 }
 
-
-static int cfg__parse_context(Cfg_Config *cfg, Cfg_Variable *ctx)
+static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value)
 {
-    // TODO    
+    if (lexer->tokens_len == lexer->tokens_cap) {
+        lexer->tokens_cap *= 2;
+        lexer->tokens = realloc(lexer->tokens, lexer->tokens_cap);
+        if (!lexer->tokens) {
+            // TODO: add handlig error
+        }
+    }
+    
+    size_t idx = lexer->tokens_len++;
+    lexer->tokens[idx].type = type;
+    lexer->tokens[idx].value = value;
+    lexer->tokens[idx].line = lexer->line;
+    lexer->tokens[idx].column = lexer->column;
 }
 
-static void cfg__add_variable(Cfg_Variable *ctx, char *name, char *value)
+static void cfg__context_add_variable(Cfg_Variable *ctx, char *name, char *value)
 {
     if (ctx->vars_len == ctx->vars_cap) {
         ctx->vars_cap *= 2;
         ctx->vars = realloc(ctx->vars, ctx->vars_cap);
         if (!ctx->vars) {
-            perror("realloc");
+            // TODO: add handlig error
         }
     }
 
-    ctx->vars[ctx->vars_len++].name = strdup(name);
-    ctx->vars[ctx->vars_len++].value = strdup(value);
+    printf("adding variable: %s = %s\n", name, value);
+
+    ctx->vars[ctx->vars_len].name = strdup(name);
+    ctx->vars[ctx->vars_len].value = strdup(value);
+    ctx->vars_len++;
 }
-static int cfg__open_file(Cfg_Config *cfg, const char *file_path)
+
+static void cfg__context_free(Cfg_Variable *ctx)
+{
+    if (ctx->vars_len != 0) {
+        for (size_t i = 0; i < ctx->vars_len; ++i) {
+            cfg__context_free(&ctx->vars[i]);
+        }
+    }
+    free(ctx->name);
+    free(ctx->value);
+    free(ctx->vars);
+}
+
+static int cfg__file_open(Cfg_Config *cfg, const char *file_path)
 {
     FILE *file = fopen(file_path, "r");
     if (!file) {
@@ -155,9 +220,132 @@ static int cfg__open_file(Cfg_Config *cfg, const char *file_path)
     return 0;
 }
 
-static int cfg__parse_file(Cfg_Config *cfg, Cfg_Variable *ctx)
+static char *cfg__file_get_str(Cfg_Config *cfg)
 {
-    // TODO
+    fseek(cfg->file, 0, SEEK_END);
+    long size = ftell(cfg->file);
+    fseek(cfg->file, 0, SEEK_SET);
+    char *file_str = malloc(sizeof(char) * (size + 1));
+    if (!file_str) {
+        // TODO: add handlig error
+    }
+    fread(file_str, sizeof(char), size, cfg->file);
+    file_str[size] = '\0';
+    return file_str;
+}
+
+static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
+{
+    Cfg_Lexer *lexer = cfg__lexer_create(cfg);
+
+    printf("%s\n", lexer->file);
+
+    printf("Tokenizer started\n");
+
+    while (*lexer->ch_current != '\0') {
+        printf("%lu, %lu: %c\n", lexer->line, lexer->column, *lexer->ch_current);
+        lexer->column++;
+        switch (*lexer->ch_current) {
+        case ' ':
+            break;
+        case '\n':
+            lexer->line++;
+            lexer->column = 0;
+            break;
+        case '=':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_EQ, "=");
+            break;
+        case ';':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_SEMICOLON, ";");
+            break;
+        default:
+            if (isdigit(*lexer->ch_current)) {
+                lexer->str_start = lexer->ch_current;
+
+                while (isdigit(*lexer->ch_current)) {
+                        lexer->ch_current++;
+                        lexer->column++;
+                }
+
+                size_t len = lexer->ch_current - lexer->str_start;
+                char *value = malloc(sizeof(char) * (len + 1));
+                value[len] = '\0';
+                strncpy(value, lexer->str_start, len);
+
+                cfg__lexer_add_token(lexer, CFG_TOKEN_INT, value);
+
+                continue;
+            } else {
+                lexer->str_start = lexer->ch_current;
+
+                while (*lexer->ch_current != ' ' && *lexer->ch_current != '=') {
+                    lexer->ch_current++;
+                    lexer->column++;
+                }
+
+                size_t len = lexer->ch_current - lexer->str_start;
+                char *value = malloc(sizeof(char) * (len + 1));
+                value[len] = '\0';
+                strncpy(value, lexer->str_start, len);
+
+                cfg__lexer_add_token(lexer, CFG_TOKEN_IDENTIFIER, value);
+            }
+        }
+        lexer->ch_current++;
+    }
+
+    printf("File tokenized\n");
+
+    for (size_t i = 0; i < lexer->tokens_len; ++i) {
+        printf("%d\t", lexer->tokens[i].type);
+        printf("%s\n", lexer->tokens[i].value);
+    }
+    
+    return lexer;
+}
+
+static int cfg__file_parse(Cfg_Config *cfg)
+{
+    Cfg_Lexer *lexer = cfg__file_tokenize(cfg);
+
+    int expected_token = CFG_TOKEN_IDENTIFIER;
+    char *name = NULL;
+    char *value = NULL;
+    Cfg_Token *tokens = lexer->tokens;
+    for (size_t i = 0; i < lexer->tokens_len; ++i) {
+        if (tokens[i].type != expected_token) {
+            if (tokens[i].type == CFG_TOKEN_EOF) {
+                break;
+            }
+        } else {
+            switch (expected_token) {
+                case CFG_TOKEN_IDENTIFIER:
+                    name = tokens[i].value;
+                    expected_token = CFG_TOKEN_EQ;
+                    break;
+                case CFG_TOKEN_EQ:
+                    expected_token = CFG_TOKEN_INT;
+                    break;
+                case CFG_TOKEN_INT:
+                    value = tokens[i].value;
+                    expected_token = CFG_TOKEN_SEMICOLON;
+                    break;
+                case CFG_TOKEN_SEMICOLON:
+                    cfg__context_add_variable(&cfg->global, name, value);
+                    name = NULL;
+                    value = NULL;
+                    expected_token = CFG_TOKEN_IDENTIFIER;
+                    break;
+            }
+        }
+    }
+
+    for (int i = 0; i < cfg->global.vars_len; ++i) {
+        printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
+    }
+
+    cfg__lexer_free(lexer);
+    return 0;
 }
 
 
@@ -166,16 +354,20 @@ static int cfg__parse_file(Cfg_Config *cfg, Cfg_Variable *ctx)
 Cfg_Config *cfg_init(void)
 {
     Cfg_Config *cfg = malloc(sizeof(Cfg_Config));
-    cfg->global.vars = malloc(INITIAL_VARIABLES_NUM * sizeof(Cfg_Variable));
+    cfg->global.vars = malloc(INIT_VARIABLES_NUM * sizeof(Cfg_Variable));
+    if (!cfg || !cfg->global.vars) {
+        // TODO: add handlig error
+    }
     cfg->global.vars_len = 0;
-    cfg->global.vars_cap = INITIAL_VARIABLES_NUM;
+    cfg->global.vars_cap = INIT_VARIABLES_NUM;
     cfg->err.type = CFG_ERROR_NONE;
     cfg->err.message = NULL;
     return cfg;
 }
 
-void cfg_destroy(Cfg_Config *cfg)
+void cfg_free(Cfg_Config *cfg)
 {
+    cfg__context_free(&cfg->global);
     if (cfg->file != NULL) {
         fclose(cfg->file);
     }
@@ -187,8 +379,8 @@ void cfg_destroy(Cfg_Config *cfg)
 
 int cfg_load_file(Cfg_Config *cfg, const char *file_path)
 {
-    if ((cfg__open_file(cfg, file_path)) != 0 ||
-        (cfg__parse_file(cfg, &cfg->global) != 0)) {
+    if ((cfg__file_open(cfg, file_path)) != 0 ||
+        (cfg__file_parse(cfg) != 0)) {
         return 1;
     }
     return 0;
