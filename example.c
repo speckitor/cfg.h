@@ -8,5 +8,6 @@ int main(void)
     cfg_load_file(cfg, "./test.cfg");
 
     cfg_destroy(cfg);
+
     return 0;
 }

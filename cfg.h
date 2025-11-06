@@ -88,12 +88,13 @@ char *cfg_get_error_message(Cfg_Config *cfg);
 
 typedef enum {
     // Types with string literal values
-    CFG_TOKEN_EQ = 0,
-    CFG_TOKEN_SEMICOLON,
-    CFG_TOKEN_EOF,
+    CFG_TOKEN_EQ = 1,
+    CFG_TOKEN_SEMICOLON = 2,
+    CFG_TOKEN_EOF = 4,
     // Types with dinamicly allocated values
-    CFG_TOKEN_IDENTIFIER,
-    CFG_TOKEN_INT,
+    CFG_TOKEN_IDENTIFIER = 8,
+    CFG_TOKEN_INT = 16,
+    CFG_TOKEN_STRING = 32,
 } Cfg_Token_Type;
 
 typedef struct {
@@ -278,6 +279,20 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
                 cfg__lexer_add_token(lexer, CFG_TOKEN_INT, value);
 
                 continue;
+            } else if (*lexer->ch_current == '"') {
+                lexer->str_start = ++lexer->ch_current;
+
+                while (*lexer->ch_current != '"') {
+                    lexer->ch_current++;
+                    lexer->column++;
+                }
+
+                size_t len = lexer->ch_current - lexer->str_start;
+                char *value = malloc(sizeof(char) * (len + 1));
+                value[len] = '\0';
+                strncpy(value, lexer->str_start, len);
+
+                cfg__lexer_add_token(lexer, CFG_TOKEN_STRING, value);
             } else {
                 lexer->str_start = lexer->ch_current;
 
@@ -311,37 +326,45 @@ static int cfg__file_parse(Cfg_Config *cfg)
 {
     Cfg_Lexer *lexer = cfg__file_tokenize(cfg);
 
-    int expected_token = CFG_TOKEN_IDENTIFIER;
+    int expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
     char *name = NULL;
     char *value = NULL;
     Cfg_Token *tokens = lexer->tokens;
     for (size_t i = 0; i < lexer->tokens_len; ++i) {
-        if (tokens[i].type != expected_token) {
-            if (tokens[i].type == CFG_TOKEN_EOF) {
+        if (tokens[i].type & expected_token) {
+            switch (tokens[i].type) {
+            case CFG_TOKEN_IDENTIFIER:
+                name = tokens[i].value;
+                expected_token = CFG_TOKEN_EQ;
                 break;
+            case CFG_TOKEN_EQ:
+                expected_token = CFG_TOKEN_INT | CFG_TOKEN_STRING;
+                break;
+            case CFG_TOKEN_INT:
+                value = tokens[i].value;
+                expected_token = CFG_TOKEN_SEMICOLON;
+                break;
+            case CFG_TOKEN_STRING:
+                value = tokens[i].value;
+                expected_token = CFG_TOKEN_SEMICOLON;
+                break;
+            case CFG_TOKEN_SEMICOLON:
+                cfg__context_add_variable(&cfg->global, name, value);
+                name = NULL;
+                value = NULL;
+                expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
+                break;
+            default:
+                goto quit;
             }
         } else {
-            switch (expected_token) {
-                case CFG_TOKEN_IDENTIFIER:
-                    name = tokens[i].value;
-                    expected_token = CFG_TOKEN_EQ;
-                    break;
-                case CFG_TOKEN_EQ:
-                    expected_token = CFG_TOKEN_INT;
-                    break;
-                case CFG_TOKEN_INT:
-                    value = tokens[i].value;
-                    expected_token = CFG_TOKEN_SEMICOLON;
-                    break;
-                case CFG_TOKEN_SEMICOLON:
-                    cfg__context_add_variable(&cfg->global, name, value);
-                    name = NULL;
-                    value = NULL;
-                    expected_token = CFG_TOKEN_IDENTIFIER;
-                    break;
-            }
+            fprintf(stderr, "Unexpected token\n");
+            goto quit;
+            // TODO: handle unexpected token
         }
     }
+
+quit:
 
     for (int i = 0; i < cfg->global.vars_len; ++i) {
         printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
