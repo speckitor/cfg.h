@@ -120,6 +120,9 @@ static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg);
 static void cfg__lexer_free(Cfg_Lexer *lexer);
 static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value);
 
+static void cfg__context_add_variable(Cfg_Variable *ctx, char *name, char *value);
+static void cfg__context_free(Cfg_Variable *ctx);
+
 static int cfg__file_open(Cfg_Config *cfg, const char *file_path);
 static char *cfg__file_get_str(Cfg_Config *cfg);
 static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg);
@@ -365,7 +368,7 @@ Cfg_Config *cfg_init(void)
     return cfg;
 }
 
-void cfg_free(Cfg_Config *cfg)
+void cfg_destroy(Cfg_Config *cfg)
 {
     cfg__context_free(&cfg->global);
     if (cfg->file != NULL) {
