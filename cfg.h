@@ -31,12 +31,12 @@
 #include <string.h>
 #include <time.h>
 
-#define MAX_NAME_LENGTH 256
-#define MAX_VALUE_LENGTH 256
+
 typedef enum {
     CFG_ERROR_NONE = 0,
     CFG_ERROR_OPEN_FILE,
     CFG_ERROR_MEMORY_ALLOCATION,
+    CFG_ERROR_UNKNOWN_TOKEN,
     CFG_ERROR_UNEXPECTED_TOKEN,
     CFG_ERROR_COUNT,
 } Cfg_Error_Type;
@@ -99,7 +99,8 @@ typedef enum {
     // Types with dinamicly allocated values
     CFG_TOKEN_IDENTIFIER = 8,
     CFG_TOKEN_INT = 16,
-    CFG_TOKEN_STRING = 32,
+    CFG_TOKEN_DOUBLE = 32,
+    CFG_TOKEN_STRING = 64,
 } Cfg_Token_Type;
 
 typedef struct {
@@ -129,7 +130,6 @@ static void cfg__string_add_char(char *str, size_t *cap, char ch);
 static char *cfg__lexer_parse_string(Cfg_Lexer *lexer);
 
 static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value);
-
 
 static void cfg__context_add_variable(Cfg_Variable *ctx, char *name, char *value);
 static void cfg__context_free(Cfg_Variable *ctx);
@@ -345,9 +345,19 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
             if (isdigit(*lexer->ch_current)) {
                 lexer->str_start = lexer->ch_current;
 
-                while (isdigit(*lexer->ch_current)) {
+                size_t dots = 0;
+
+                while (isdigit(*lexer->ch_current) || *lexer->ch_current == '.') {
+                        if (*lexer->ch_current == '.') {
+                            dots++;
+                        }
+
                         lexer->ch_current++;
                         lexer->column++;
+                }
+
+                if (dots > 1) {
+                    // TODO: handle unparsable token
                 }
 
                 size_t len = lexer->ch_current - lexer->str_start;
@@ -355,7 +365,11 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
                 value[len] = '\0';
                 strncpy(value, lexer->str_start, len);
 
-                cfg__lexer_add_token(lexer, CFG_TOKEN_INT, value);
+                if (dots < 1) {
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_INT, value);
+                } else {
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_DOUBLE, value);
+                }
 
                 continue;
             } else if (*lexer->ch_current == '"') {
@@ -405,7 +419,7 @@ static int cfg__file_parse(Cfg_Config *cfg)
         if (tokens[i].type & expected_token) {
             switch (tokens[i].type) {
             case CFG_TOKEN_EQ:
-                expected_token = CFG_TOKEN_INT | CFG_TOKEN_STRING;
+                expected_token = CFG_TOKEN_INT | CFG_TOKEN_DOUBLE | CFG_TOKEN_STRING;
                 break;
             case CFG_TOKEN_SEMICOLON:
                 cfg__context_add_variable(&cfg->global, name, value);
@@ -418,6 +432,10 @@ static int cfg__file_parse(Cfg_Config *cfg)
                 expected_token = CFG_TOKEN_EQ;
                 break;
             case CFG_TOKEN_INT:
+                value = tokens[i].value;
+                expected_token = CFG_TOKEN_SEMICOLON;
+                break;
+            case CFG_TOKEN_DOUBLE:
                 value = tokens[i].value;
                 expected_token = CFG_TOKEN_SEMICOLON;
                 break;
