@@ -100,7 +100,8 @@ typedef enum {
     CFG_TOKEN_IDENTIFIER = 8,
     CFG_TOKEN_INT = 16,
     CFG_TOKEN_DOUBLE = 32,
-    CFG_TOKEN_STRING = 64,
+    CFG_TOKEN_BOOL = 64,
+    CFG_TOKEN_STRING = 128,
 } Cfg_Token_Type;
 
 typedef struct {
@@ -381,7 +382,9 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
             } else {
                 lexer->str_start = lexer->ch_current;
 
-                while (*lexer->ch_current != ' ' && *lexer->ch_current != '=') {
+                while (*lexer->ch_current != ' ' &&
+                       *lexer->ch_current != '=' &&
+                       *lexer->ch_current != ';') {
                     lexer->ch_current++;
                     lexer->column++;
                 }
@@ -391,7 +394,13 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
                 value[len] = '\0';
                 strncpy(value, lexer->str_start, len);
 
-                cfg__lexer_add_token(lexer, CFG_TOKEN_IDENTIFIER, value);
+                if (strcmp(value, "true") == 0 ||
+                    strcmp(value, "false") == 0) {
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_BOOL, value);
+                    continue;
+                } else {
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_IDENTIFIER, value);
+                }
             }
         }
         lexer->ch_current++;
@@ -419,7 +428,10 @@ static int cfg__file_parse(Cfg_Config *cfg)
         if (tokens[i].type & expected_token) {
             switch (tokens[i].type) {
             case CFG_TOKEN_EQ:
-                expected_token = CFG_TOKEN_INT | CFG_TOKEN_DOUBLE | CFG_TOKEN_STRING;
+                expected_token = CFG_TOKEN_INT |
+                                 CFG_TOKEN_DOUBLE |
+                                 CFG_TOKEN_BOOL |
+                                 CFG_TOKEN_STRING;
                 break;
             case CFG_TOKEN_SEMICOLON:
                 cfg__context_add_variable(&cfg->global, name, value);
@@ -436,6 +448,10 @@ static int cfg__file_parse(Cfg_Config *cfg)
                 expected_token = CFG_TOKEN_SEMICOLON;
                 break;
             case CFG_TOKEN_DOUBLE:
+                value = tokens[i].value;
+                expected_token = CFG_TOKEN_SEMICOLON;
+                break;
+            case CFG_TOKEN_BOOL:
                 value = tokens[i].value;
                 expected_token = CFG_TOKEN_SEMICOLON;
                 break;
