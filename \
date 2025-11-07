@@ -24,7 +24,6 @@
 
 
 #include <ctype.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -36,8 +35,6 @@
 typedef enum {
     CFG_ERROR_NONE = 0,
     CFG_ERROR_OPEN_FILE,
-    CFG_ERROR_MEMORY_ALLOCATION,
-    CFG_ERROR_UNEXPECTED_TOKEN,
     CFG_ERROR_COUNT,
 } Cfg_Error_Type;
 
@@ -89,8 +86,6 @@ char *cfg_get_error_message(Cfg_Config *cfg);
 
 #define INIT_TOKENS_NUM 32
 
-#define INIT_STRING_SIZE 64
-
 typedef enum {
     // Types with string literal values
     CFG_TOKEN_EQ = 1,
@@ -124,12 +119,7 @@ typedef struct {
 
 static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg);
 static void cfg__lexer_free(Cfg_Lexer *lexer);
-
-static void cfg__string_add_char(char *str, size_t *cap, char ch);
-static char *cfg__lexer_parse_string(Cfg_Lexer *lexer);
-
 static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value);
-
 
 static void cfg__context_add_variable(Cfg_Variable *ctx, char *name, char *value);
 static void cfg__context_free(Cfg_Variable *ctx);
@@ -149,7 +139,7 @@ static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
     lexer->tokens = malloc(sizeof(Cfg_Token) * INIT_TOKENS_NUM);
 
     if (!lexer || !lexer->tokens) {
-        // TODO: add handling error
+        // TODO: add handlig error
     }
 
     lexer->file = src;
@@ -183,7 +173,7 @@ static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *va
         lexer->tokens_cap *= 2;
         lexer->tokens = realloc(lexer->tokens, lexer->tokens_cap);
         if (!lexer->tokens) {
-            // TODO: add handling error
+            // TODO: add handlig error
         }
     }
     
@@ -194,82 +184,13 @@ static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *va
     lexer->tokens[idx].column = lexer->column;
 }
 
-static void cfg__string_add_char(char *str, size_t *cap, char ch)
-{
-    if (strlen(str) + 1 == *cap) {
-        *cap *= 2;
-        str = realloc(str, *cap);
-        if (!str) {
-            // TODO: add handling error
-        }
-    }
-    str[strlen(str)] = ch;
-}
-
-static char *cfg__lexer_parse_string(Cfg_Lexer *lexer)
-{
-    char *str = malloc(sizeof(char) * INIT_STRING_SIZE);
-    size_t cap = INIT_STRING_SIZE;
-
-    char ch;
-    bool backslash = false;
-    while (*lexer->ch_current != '"' || backslash) {
-        if (*lexer->ch_current == '\\') {
-            if (backslash) {
-                ch = '\\';
-                cfg__string_add_char(str, &cap, ch);
-                backslash = false;
-                lexer->ch_current++;
-                lexer->column++;
-                continue;
-            }
-            backslash = true;
-            lexer->ch_current++;
-            lexer->column++;
-            continue;
-        }
-
-        if (backslash) {
-            switch (*lexer->ch_current) {
-            case 'n':
-                ch = '\n';
-                break;
-            case 't':
-                ch = '\t';
-                break;
-            case '\"':
-                ch = '\"';
-                break;
-            case '\'':
-                ch = '\'';
-                break;
-            default:
-                cfg__string_add_char(str, &cap, '\\');
-                ch = *lexer->ch_current;
-                break;
-            }
-            backslash = false;
-        } else {
-            ch = *lexer->ch_current;
-        }
-
-        cfg__string_add_char(str, &cap, ch);
-        lexer->ch_current++;
-        lexer->column++;
-    }
-
-    cfg__string_add_char(str, &cap, '\0');
-
-    return str;
-}
-
 static void cfg__context_add_variable(Cfg_Variable *ctx, char *name, char *value)
 {
     if (ctx->vars_len == ctx->vars_cap) {
         ctx->vars_cap *= 2;
         ctx->vars = realloc(ctx->vars, ctx->vars_cap);
         if (!ctx->vars) {
-            // TODO: add handling error
+            // TODO: add handlig error
         }
     }
 
@@ -310,7 +231,7 @@ static char *cfg__file_get_str(Cfg_Config *cfg)
     fseek(cfg->file, 0, SEEK_SET);
     char *file_str = malloc(sizeof(char) * (size + 1));
     if (!file_str) {
-        // TODO: add handling error
+        // TODO: add handlig error
     }
     fread(file_str, sizeof(char), size, cfg->file);
     file_str[size] = '\0';
@@ -361,7 +282,16 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
             } else if (*lexer->ch_current == '"') {
                 lexer->str_start = ++lexer->ch_current;
 
-                char *value = cfg__lexer_parse_string(lexer);
+                bool backslash = false;
+                while (*lexer->ch_current != '"' || backslash) {
+                    lexer->ch_current++;
+                    lexer->column++;
+                }
+
+                size_t len = lexer->ch_current - lexer->str_start;
+                char *value = malloc(sizeof(char) * (len + 1));
+                value[len] = '\0';
+                strncpy(value, lexer->str_start, len);
 
                 cfg__lexer_add_token(lexer, CFG_TOKEN_STRING, value);
             } else {
@@ -404,18 +334,12 @@ static int cfg__file_parse(Cfg_Config *cfg)
     for (size_t i = 0; i < lexer->tokens_len; ++i) {
         if (tokens[i].type & expected_token) {
             switch (tokens[i].type) {
-            case CFG_TOKEN_EQ:
-                expected_token = CFG_TOKEN_INT | CFG_TOKEN_STRING;
-                break;
-            case CFG_TOKEN_SEMICOLON:
-                cfg__context_add_variable(&cfg->global, name, value);
-                name = NULL;
-                value = NULL;
-                expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
-                break;
             case CFG_TOKEN_IDENTIFIER:
                 name = tokens[i].value;
                 expected_token = CFG_TOKEN_EQ;
+                break;
+            case CFG_TOKEN_EQ:
+                expected_token = CFG_TOKEN_INT | CFG_TOKEN_STRING;
                 break;
             case CFG_TOKEN_INT:
                 value = tokens[i].value;
@@ -424,6 +348,12 @@ static int cfg__file_parse(Cfg_Config *cfg)
             case CFG_TOKEN_STRING:
                 value = tokens[i].value;
                 expected_token = CFG_TOKEN_SEMICOLON;
+                break;
+            case CFG_TOKEN_SEMICOLON:
+                cfg__context_add_variable(&cfg->global, name, value);
+                name = NULL;
+                value = NULL;
+                expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
                 break;
             default:
                 printf("End of file, quitting\n");
@@ -454,7 +384,7 @@ Cfg_Config *cfg_init(void)
     Cfg_Config *cfg = malloc(sizeof(Cfg_Config));
     cfg->global.vars = malloc(INIT_VARIABLES_NUM * sizeof(Cfg_Variable));
     if (!cfg || !cfg->global.vars) {
-        // TODO: add handling error
+        // TODO: add handlig error
     }
     cfg->global.vars_len = 0;
     cfg->global.vars_cap = INIT_VARIABLES_NUM;
