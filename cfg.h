@@ -24,12 +24,10 @@
 
 
 #include <ctype.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-#include <time.h>
 
 
 typedef enum {
@@ -192,7 +190,11 @@ static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *va
     lexer->tokens[idx].type = type;
     lexer->tokens[idx].value = value;
     lexer->tokens[idx].line = lexer->line;
-    lexer->tokens[idx].column = lexer->column;
+    if (strlen(value) > 1) {
+        lexer->tokens[idx].column = lexer->column - strlen(value);
+    } else {
+        lexer->tokens[idx].column = lexer->column;
+    }
 }
 
 static void cfg__string_add_char(char *str, size_t *cap, char ch)
@@ -410,7 +412,9 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
 
     for (size_t i = 0; i < lexer->tokens_len; ++i) {
         printf("%d\t", lexer->tokens[i].type);
-        printf("%s\n", lexer->tokens[i].value);
+        printf("%s\t", lexer->tokens[i].value);
+        printf("%lu\t", lexer->tokens[i].line);
+        printf("%lu\n", lexer->tokens[i].column);
     }
     
     return lexer;
@@ -420,6 +424,7 @@ static int cfg__file_parse(Cfg_Config *cfg)
 {
     Cfg_Lexer *lexer = cfg__file_tokenize(cfg);
 
+    int prev_token = 0;
     int expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
     char *name = NULL;
     char *value = NULL;
@@ -456,8 +461,12 @@ static int cfg__file_parse(Cfg_Config *cfg)
                 expected_token = CFG_TOKEN_SEMICOLON;
                 break;
             case CFG_TOKEN_STRING:
-                value = tokens[i].value;
-                expected_token = CFG_TOKEN_SEMICOLON;
+                if (prev_token & CFG_TOKEN_STRING) {
+                    strcat(value, tokens[i].value);
+                } else {
+                    value = tokens[i].value;
+                }
+                expected_token = CFG_TOKEN_SEMICOLON | CFG_TOKEN_STRING;
                 break;
             default:
                 printf("End of file, quitting\n");
@@ -468,6 +477,7 @@ static int cfg__file_parse(Cfg_Config *cfg)
             goto quit;
             // TODO: handle unexpected token
         }
+        prev_token = tokens[i].type;
     }
 
 quit:
