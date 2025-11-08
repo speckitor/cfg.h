@@ -84,22 +84,27 @@ char *cfg_get_error_message(Cfg_Config *cfg);
 // Private functions and types
 
 #define INIT_VARIABLES_NUM 32
-
 #define INIT_TOKENS_NUM 32
-
 #define INIT_STRING_SIZE 64
+
+#define MAX_VARIABLES_DEPTH 64
 
 typedef enum {
     // Types with string literal values
     CFG_TOKEN_EQ = 1,
     CFG_TOKEN_SEMICOLON = 2,
-    CFG_TOKEN_EOF = 4,
+    CFG_TOKEN_COMMA = 4,
+    CFG_TOKEN_LEFT_BRACKET = 8,
+    CFG_TOKEN_RIGHT_BRACKET = 16,
+    CFG_TOKEN_LEFT_CURLY_BRACKET = 32,
+    CFG_TOKEN_RIGHT_CURLY_BRACKET = 64,
+    CFG_TOKEN_EOF = 128,
     // Types with dinamicly allocated values
-    CFG_TOKEN_IDENTIFIER = 8,
-    CFG_TOKEN_INT = 16,
-    CFG_TOKEN_DOUBLE = 32,
-    CFG_TOKEN_BOOL = 64,
-    CFG_TOKEN_STRING = 128,
+    CFG_TOKEN_IDENTIFIER = 256,
+    CFG_TOKEN_INT = 512,
+    CFG_TOKEN_DOUBLE = 1024,
+    CFG_TOKEN_BOOL = 2048,
+    CFG_TOKEN_STRING = 4096,
 } Cfg_Token_Type;
 
 typedef struct {
@@ -110,14 +115,22 @@ typedef struct {
 } Cfg_Token;
 
 typedef struct {
+    char stack[MAX_VARIABLES_DEPTH];
+    size_t len;
+    size_t max;
+} Cfg_Context_Stack;
+
+typedef struct {
     char *file;
     char *str_start;
     char *ch_current;
     Cfg_Token *tokens;
+    size_t cur_token;
     size_t tokens_len;
     size_t tokens_cap;
     size_t line;
     size_t column;
+    Cfg_Context_Stack stack;
 } Cfg_Lexer;
 
 // Private functions forward declarations
@@ -136,7 +149,9 @@ static void cfg__context_free(Cfg_Variable *ctx);
 static int cfg__file_open(Cfg_Config *cfg, const char *file_path);
 static char *cfg__file_get_str(Cfg_Config *cfg);
 static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg);
-static int cfg__file_parse(Cfg_Config *cfg);
+static int cfg__file_parse_struct(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer);
+static int cfg__file_parse_list(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer);
+static int cfg__file_parse(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer);
 
 // Private functions definition
 
@@ -155,6 +170,7 @@ static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
     lexer->str_start = NULL;
     lexer->ch_current = src;
 
+    lexer->cur_token = 0;
     lexer->tokens_len = 0;
     lexer->tokens_cap = INIT_TOKENS_NUM;
 
@@ -344,6 +360,21 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
         case ';':
             cfg__lexer_add_token(lexer, CFG_TOKEN_SEMICOLON, ";");
             break;
+        case ',':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_COMMA, ",");
+            break;
+        case '[':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_BRACKET, "[");
+            break;
+        case ']':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_BRACKET, "]");
+            break;
+        case '{':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_CURLY_BRACKET, "{");
+            break;
+        case '}':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_CURLY_BRACKET, "}");
+            break;
         default:
             if (isdigit(*lexer->ch_current)) {
                 lexer->str_start = lexer->ch_current;
@@ -420,20 +451,25 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
     return lexer;
 }
 
-static int cfg__file_parse(Cfg_Config *cfg)
+static int cfg__file_parse(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer)
 {
-    Cfg_Lexer *lexer = cfg__file_tokenize(cfg);
+    if (!lexer) {
+        Cfg_Lexer *lexer = cfg__file_tokenize(cfg);
+    }
 
     int prev_token = 0;
     int expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
     char *name = NULL;
     char *value = NULL;
     Cfg_Token *tokens = lexer->tokens;
-    for (size_t i = 0; i < lexer->tokens_len; ++i) {
+    for (size_t i = lexer->cur_token; i < lexer->tokens_len; ++i) {
+        lexer->cur_token = i;
         if (tokens[i].type & expected_token) {
             switch (tokens[i].type) {
             case CFG_TOKEN_EQ:
-                expected_token = CFG_TOKEN_INT |
+                expected_token = CFG_TOKEN_LEFT_BRACKET |
+                                 CFG_TOKEN_LEFT_CURLY_BRACKET |
+                                 CFG_TOKEN_INT |
                                  CFG_TOKEN_DOUBLE |
                                  CFG_TOKEN_BOOL |
                                  CFG_TOKEN_STRING;
@@ -443,6 +479,11 @@ static int cfg__file_parse(Cfg_Config *cfg)
                 name = NULL;
                 value = NULL;
                 expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
+                break;
+            case CFG_TOKEN_LEFT_BRACKET:
+                lexer->cur_token++;
+                cfg__file_parse(cfg, &cfg->global.vars[cfg->global.vars_len], lexer);
+                i = lexer->cur_token;
                 break;
             case CFG_TOKEN_IDENTIFIER:
                 name = tokens[i].value;
@@ -482,11 +523,12 @@ static int cfg__file_parse(Cfg_Config *cfg)
 
 quit:
 
-    for (int i = 0; i < cfg->global.vars_len; ++i) {
-        printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
+    if (&cfg->global == ctx) {
+        for (int i = 0; i < cfg->global.vars_len; ++i) {
+            printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
+        }
+        cfg__lexer_free(lexer);
     }
-
-    cfg__lexer_free(lexer);
     return 0;
 }
 
@@ -522,7 +564,7 @@ void cfg_destroy(Cfg_Config *cfg)
 int cfg_load_file(Cfg_Config *cfg, const char *file_path)
 {
     if ((cfg__file_open(cfg, file_path)) != 0 ||
-        (cfg__file_parse(cfg) != 0)) {
+        (cfg__file_parse(cfg, &cfg->global, NULL) != 0)) {
         return 1;
     }
     return 0;
