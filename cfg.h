@@ -83,11 +83,10 @@ char *cfg_get_error_message(Cfg_Config *cfg);
 
 // Private functions and types
 
-#define INIT_VARIABLES_NUM 32
-#define INIT_TOKENS_NUM 32
+#define INIT_VARIABLES_NUM 64
+#define INIT_TOKENS_NUM 64
 #define INIT_STRING_SIZE 64
-
-#define MAX_VARIABLES_DEPTH 64
+#define INIT_STACK_SIZE 64
 
 typedef enum {
     // Types with string literal values
@@ -115,10 +114,10 @@ typedef struct {
 } Cfg_Token;
 
 typedef struct {
-    char stack[MAX_VARIABLES_DEPTH];
+    char *values;
     size_t len;
-    size_t max;
-} Cfg_Context_Stack;
+    size_t cap;
+} Cfg_Stack;
 
 typedef struct {
     char *file;
@@ -130,7 +129,7 @@ typedef struct {
     size_t tokens_cap;
     size_t line;
     size_t column;
-    Cfg_Context_Stack stack;
+    Cfg_Stack stack;
 } Cfg_Lexer;
 
 // Private functions forward declarations
@@ -143,15 +142,16 @@ static char *cfg__lexer_parse_string(Cfg_Lexer *lexer);
 
 static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value);
 
+static void cfg__stack_add_char(Cfg_Stack *stack, char ch);
+static void cfg__stack_remove_char(Cfg_Stack *stack);
+
 static void cfg__context_add_variable(Cfg_Variable *ctx, char *name, char *value);
 static void cfg__context_free(Cfg_Variable *ctx);
 
 static int cfg__file_open(Cfg_Config *cfg, const char *file_path);
 static char *cfg__file_get_str(Cfg_Config *cfg);
 static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg);
-static int cfg__file_parse_struct(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer);
-static int cfg__file_parse_list(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer);
-static int cfg__file_parse(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer);
+static int cfg__file_parse(Cfg_Config *cfg);
 
 // Private functions definition
 
@@ -161,8 +161,9 @@ static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
 
     Cfg_Lexer *lexer = malloc(sizeof(Cfg_Lexer)); 
     lexer->tokens = malloc(sizeof(Cfg_Token) * INIT_TOKENS_NUM);
+    lexer->stack.values = malloc(sizeof(char) * INIT_STACK_SIZE);
 
-    if (!lexer || !lexer->tokens) {
+    if (!lexer || !lexer->tokens || !lexer->stack.values) {
         // TODO: add handling error
     }
 
@@ -177,11 +178,15 @@ static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
     lexer->line = 0;
     lexer->column = 0;
 
+    lexer->stack.cap = INIT_STACK_SIZE;
+    lexer->stack.len = 0;
+
     return lexer;
 }
 
 static void cfg__lexer_free(Cfg_Lexer *lexer)
 {
+    free(lexer->stack.values);
     free(lexer->file);
     for (int i = 0; i < lexer->tokens_len; ++i) {
         if (lexer->tokens[i].type > CFG_TOKEN_EOF) {
@@ -210,6 +215,28 @@ static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *va
         lexer->tokens[idx].column = lexer->column - strlen(value);
     } else {
         lexer->tokens[idx].column = lexer->column;
+    }
+}
+
+static void cfg__stack_add_char(Cfg_Stack *stack, char ch)
+{
+    if (stack->len == stack->cap) {
+        stack->cap *= 2;
+        stack->values = realloc(stack->values, stack->cap);
+        if (!stack->values) {
+            // TODO: handle error
+        }
+    }
+
+    stack->values[stack->len++] = ch;
+}
+
+static void cfg__stack_remove_char(Cfg_Stack *stack)
+{
+    if (stack->len == 0) {
+        // TODO: handle error
+    } else {
+        stack->values[stack->len--] = '\0';
     }
 }
 
@@ -296,6 +323,9 @@ static void cfg__context_add_variable(Cfg_Variable *ctx, char *name, char *value
 
     ctx->vars[ctx->vars_len].name = strdup(name);
     ctx->vars[ctx->vars_len].value = strdup(value);
+    ctx->vars[ctx->vars_len].vars = malloc(sizeof(Cfg_Variable) * INIT_VARIABLES_NUM);
+    ctx->vars[ctx->vars_len].vars_cap = INIT_VARIABLES_NUM;
+    ctx->vars[ctx->vars_len].vars_len = 0;
     ctx->vars_len++;
 }
 
@@ -451,17 +481,16 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
     return lexer;
 }
 
-static int cfg__file_parse(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer)
+static int cfg__file_parse(Cfg_Config *cfg)
 {
-    if (!lexer) {
-        Cfg_Lexer *lexer = cfg__file_tokenize(cfg);
-    }
+    Cfg_Lexer *lexer = cfg__file_tokenize(cfg);
 
     int prev_token = 0;
     int expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
     char *name = NULL;
     char *value = NULL;
     Cfg_Token *tokens = lexer->tokens;
+    Cfg_Variable *ctx = &cfg->global;
     for (size_t i = lexer->cur_token; i < lexer->tokens_len; ++i) {
         lexer->cur_token = i;
         if (tokens[i].type & expected_token) {
@@ -482,7 +511,6 @@ static int cfg__file_parse(Cfg_Config *cfg, Cfg_Variable *ctx, Cfg_Lexer *lexer)
                 break;
             case CFG_TOKEN_LEFT_BRACKET:
                 lexer->cur_token++;
-                cfg__file_parse(cfg, &cfg->global.vars[cfg->global.vars_len], lexer);
                 i = lexer->cur_token;
                 break;
             case CFG_TOKEN_IDENTIFIER:
@@ -564,7 +592,7 @@ void cfg_destroy(Cfg_Config *cfg)
 int cfg_load_file(Cfg_Config *cfg, const char *file_path)
 {
     if ((cfg__file_open(cfg, file_path)) != 0 ||
-        (cfg__file_parse(cfg, &cfg->global, NULL) != 0)) {
+        (cfg__file_parse(cfg) != 0)) {
         return 1;
     }
     return 0;
