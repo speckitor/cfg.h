@@ -479,6 +479,7 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
                 lexer->str_start = lexer->ch_current;
 
                 while (*lexer->ch_current != ' ' &&
+                       *lexer->ch_current != '\n' &&
                        *lexer->ch_current != '=' &&
                        *lexer->ch_current != ';' &&
                        *lexer->ch_current != ',' &&
@@ -550,9 +551,9 @@ static int cfg__file_parse(Cfg_Config *cfg)
                     value = NULL;
                 }
                 expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
-                // if (cfg__stack_last_char(stack) == '{') {
-                //     expected_token |= CFG_TOKEN_RIGHT_CURLY_BRACKET;
-                // }
+                if (cfg__stack_last_char(stack) == '{') {
+                    expected_token |= CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                }
                 break;
             case CFG_TOKEN_COMMA:
                 cfg__context_add_variable(ctx, type, name, value);
@@ -579,7 +580,7 @@ static int cfg__file_parse(Cfg_Config *cfg)
                                  CFG_TOKEN_DOUBLE |
                                  CFG_TOKEN_BOOL |
                                  CFG_TOKEN_STRING |
-                                 CFG_TOKEN_RIGHT_BRACKET;
+                                 CFG_TOKEN_RIGHT_CURLY_BRACKET;
                 break;
             case CFG_TOKEN_RIGHT_BRACKET:
                 if (value != NULL) {
@@ -588,17 +589,48 @@ static int cfg__file_parse(Cfg_Config *cfg)
                 }
                 cfg__stack_pop_char(stack);
                 ctx = ctx->prev;
-                expected_token = CFG_TOKEN_SEMICOLON | CFG_TOKEN_EOF;
+                switch (cfg__stack_last_char(stack)) {
+                case '[':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
+                    break;
+                case '{':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                    break;
+                default:
+                    expected_token = CFG_TOKEN_SEMICOLON;
+                    break;
+                }
                 break;
-            // case CFG_TOKEN_LEFT_CURLY_BRACKET:
-            //     type = CFG_TYPE_STRUCT;
-            //     cfg__stack_add_char(stack, '{');
-            //     cfg__context_add_variable(ctx, type, name, NULL);
-            //     ctx = &ctx->vars[ctx->vars_len - 1];
-            //     break;
-            // case CFG_TOKEN_RIGHT_CURLY_BRACKET:
-            //     cfg__stack_pop_char(stack);
-            //     break;
+            case CFG_TOKEN_LEFT_CURLY_BRACKET:
+                type = CFG_TYPE_STRUCT;
+                cfg__stack_add_char(stack, '{');
+                value = NULL;
+                cfg__context_add_variable(ctx, type, name, value);
+                name = NULL;
+                ctx = &ctx->vars[ctx->vars_len - 1];
+                expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                break;
+            case CFG_TOKEN_RIGHT_CURLY_BRACKET:
+                if (type != 0 && name != NULL && value != NULL) {
+                    cfg__context_add_variable(ctx, type, name, value);
+                    type = 0;
+                    value = NULL;
+                    name = NULL;
+                }
+                cfg__stack_pop_char(stack);
+                ctx = ctx->prev;
+                switch (cfg__stack_last_char(stack)) {
+                case '[':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
+                    break;
+                case '{':
+                    expected_token = CFG_TOKEN_SEMICOLON | CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                    break;
+                default:
+                    expected_token = CFG_TOKEN_SEMICOLON;
+                    break;
+                }
+                break;
             case CFG_TOKEN_IDENTIFIER:
                 name = tokens[i].value;
                 expected_token = CFG_TOKEN_EQ;
@@ -606,28 +638,46 @@ static int cfg__file_parse(Cfg_Config *cfg)
             case CFG_TOKEN_INT:
                 type = CFG_TYPE_INT;
                 value = tokens[i].value;
-                if (cfg__stack_last_char(stack) == '[') {
+                switch (cfg__stack_last_char(stack)) {
+                case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
-                } else {
+                    break;
+                case '{':
+                    expected_token = CFG_TOKEN_SEMICOLON | CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                    break;
+                default:
                     expected_token = CFG_TOKEN_SEMICOLON;
+                    break;
                 }
                 break;
             case CFG_TOKEN_DOUBLE:
                 type = CFG_TYPE_DOUBLE;
                 value = tokens[i].value;
-                if (cfg__stack_last_char(stack) == '[') {
+                switch (cfg__stack_last_char(stack)) {
+                case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
-                } else {
+                    break;
+                case '{':
+                    expected_token = CFG_TOKEN_SEMICOLON | CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                    break;
+                default:
                     expected_token = CFG_TOKEN_SEMICOLON;
+                    break;
                 }
                 break;
             case CFG_TOKEN_BOOL:
                 type = CFG_TYPE_BOOL;
                 value = tokens[i].value;
-                if (cfg__stack_last_char(stack) == '[') {
+                switch (cfg__stack_last_char(stack)) {
+                case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
-                } else {
+                    break;
+                case '{':
+                    expected_token = CFG_TOKEN_SEMICOLON | CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                    break;
+                default:
                     expected_token = CFG_TOKEN_SEMICOLON;
+                    break;
                 }
                 break;
             case CFG_TOKEN_STRING:
@@ -637,11 +687,18 @@ static int cfg__file_parse(Cfg_Config *cfg)
                 } else {
                     value = tokens[i].value;
                 }
-                if (cfg__stack_last_char(stack) == '[') {
-                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET | CFG_TOKEN_STRING;
-                } else {
-                    expected_token = CFG_TOKEN_SEMICOLON | CFG_TOKEN_STRING;
+                switch (cfg__stack_last_char(stack)) {
+                case '[':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
+                    break;
+                case '{':
+                    expected_token = CFG_TOKEN_SEMICOLON | CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                    break;
+                default:
+                    expected_token = CFG_TOKEN_SEMICOLON;
+                    break;
                 }
+                expected_token |= CFG_TOKEN_STRING;
                 break;
             default:
                 printf("End of file, quitting\n");
