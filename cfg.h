@@ -147,8 +147,10 @@ typedef struct {
 
 static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg);
 static void cfg__lexer_free(Cfg_Lexer *lexer);
+
 static void cfg__string_add_char(char **str, size_t *cap, char ch);
 static char *cfg__lexer_parse_string(Cfg_Lexer *lexer);
+
 static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value);
 
 static void cfg__stack_add_char(Cfg_Stack *stack, char ch);
@@ -703,8 +705,14 @@ quit:
     if (&cfg->global == ctx) {
         for (int i = 0; i < cfg->global.vars_len; ++i) {
             if (cfg->global.vars[i].type & CFG_TYPE_LIST) {
+                printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
                 for (int j = 0; j < cfg->global.vars[i].vars_len; ++j) {
-                    printf("index: %d, value: %s\n", j, cfg->global.vars[i].vars[j].value);
+                    printf("\tindex: %d, value: %s\n", j, cfg->global.vars[i].vars[j].value);
+                }
+            } else if (cfg->global.vars[i].type & CFG_TYPE_STRUCT) {
+                printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
+                for (int j = 0; j < cfg->global.vars[i].vars_len; ++j) {
+                    printf("\tname: %s, value: %s\n", cfg->global.vars[i].vars[j].name, cfg->global.vars[i].vars[j].value);
                 }
             } else {
                 printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
