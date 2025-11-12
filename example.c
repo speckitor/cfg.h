@@ -5,7 +5,7 @@ int main(void)
 {
     Cfg_Config *cfg = cfg_init();
 
-    cfg_load_file(cfg, "./test.cfg");
+    cfg_load_file(cfg, "./example.cfg");
 
     cfg_destroy(cfg);
 
