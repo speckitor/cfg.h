@@ -202,7 +202,9 @@ static void cfg__lexer_free(Cfg_Lexer *lexer)
     free(lexer->file);
     for (int i = 0; i < lexer->tokens_len; ++i) {
         if (lexer->tokens[i].type > CFG_TOKEN_EOF) {
+            printf("Freeing value: %s\n", lexer->tokens[i].value);
             free(lexer->tokens[i].value);
+            printf("Freed\n");
         }
     }
     free(lexer->tokens);
@@ -348,9 +350,13 @@ static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *na
     ctx->vars[ctx->vars_len].type = type;
     if (name != NULL) {
         ctx->vars[ctx->vars_len].name = strdup(name);
+    } else {
+        ctx->vars[ctx->vars_len].name = NULL;
     }
     if (value != NULL) {
         ctx->vars[ctx->vars_len].value = strdup(value);
+    } else {
+        ctx->vars[ctx->vars_len].value = NULL;
     }
     ctx->vars[ctx->vars_len].prev = ctx;
     if (type & CFG_TYPE_STRUCT || type & CFG_TYPE_LIST) {
@@ -367,14 +373,15 @@ static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *na
 
 static void cfg__context_free(Cfg_Variable *ctx)
 {
-    if (ctx->vars_len != 0) {
+    printf("name: %s, value: %s, vars: %p\n", ctx->name, ctx->value, ctx->vars);
+    if (ctx->vars != NULL) {
         for (size_t i = 0; i < ctx->vars_len; ++i) {
             cfg__context_free(&ctx->vars[i]);
         }
+        free(ctx->vars);
     }
     if (ctx->name != NULL) free(ctx->name);
     if (ctx->value != NULL) free(ctx->value);
-    if (ctx->vars != NULL) free(ctx->vars);
 }
 
 static int cfg__file_open(Cfg_Config *cfg, const char *file_path)
@@ -608,8 +615,8 @@ static int cfg__file_parse(Cfg_Config *cfg)
                 }
                 break;
             case CFG_TOKEN_LEFT_CURLY_BRACKET:
-                type = CFG_TYPE_STRUCT;
                 cfg__stack_add_char(stack, '{');
+                type = CFG_TYPE_STRUCT;
                 value = NULL;
                 cfg__context_add_variable(ctx, type, name, value);
                 name = NULL;
@@ -674,7 +681,10 @@ static int cfg__file_parse(Cfg_Config *cfg)
             case CFG_TOKEN_STRING:
                 type = CFG_TYPE_STRING;
                 if (prev_token & CFG_TOKEN_STRING) {
-                    strcat(value, tokens[i].value);
+                    printf("prev: %s, curr: %s\n", value, tokens[i].value);
+                    value = realloc(value, sizeof(char) * (strlen(value) + strlen(tokens[i].value)));
+                    value = strcat(value, tokens[i].value);
+                    printf("prev: %s, curr: %s\n", value, tokens[i].value);
                 } else {
                     value = tokens[i].value;
                 }
@@ -688,38 +698,19 @@ static int cfg__file_parse(Cfg_Config *cfg)
                 }
                 expected_token |= CFG_TOKEN_STRING;
                 break;
-            default:
-                printf("End of file, quitting\n");
-                goto quit;
             }
         } else {
             fprintf(stderr, "Unexpected token: type: %d value: %s\n", tokens[i].type, tokens[i].value);
-            goto quit;
+            break;
             // TODO: handle unexpected token
         }
         prev_token = tokens[i].type;
     }
 
-quit:
+    printf("Parsed\n");
 
-    if (&cfg->global == ctx) {
-        for (int i = 0; i < cfg->global.vars_len; ++i) {
-            if (cfg->global.vars[i].type & CFG_TYPE_LIST) {
-                printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
-                for (int j = 0; j < cfg->global.vars[i].vars_len; ++j) {
-                    printf("\tindex: %d, value: %s\n", j, cfg->global.vars[i].vars[j].value);
-                }
-            } else if (cfg->global.vars[i].type & CFG_TYPE_STRUCT) {
-                printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
-                for (int j = 0; j < cfg->global.vars[i].vars_len; ++j) {
-                    printf("\tname: %s, value: %s\n", cfg->global.vars[i].vars[j].name, cfg->global.vars[i].vars[j].value);
-                }
-            } else {
-                printf("name: %s, value: %s\n", cfg->global.vars[i].name, cfg->global.vars[i].value);
-            }
-        }
-        cfg__lexer_free(lexer);
-    }
+    cfg__lexer_free(lexer);
+
     return 0;
 }
 
@@ -733,6 +724,8 @@ Cfg_Config *cfg_init(void)
     if (!cfg || !cfg->global.vars) {
         // TODO: add handling error
     }
+    cfg->global.name = NULL;
+    cfg->global.value = NULL;
     cfg->global.prev = NULL;
     cfg->global.vars_len = 0;
     cfg->global.vars_cap = INIT_VARIABLES_NUM;
