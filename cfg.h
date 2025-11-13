@@ -140,6 +140,8 @@ typedef struct {
     size_t tokens_cap;
     size_t line;
     size_t column;
+    bool comment_eol;
+    bool comment;
     Cfg_Stack stack;
 } Cfg_Lexer;
 
@@ -189,6 +191,9 @@ static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
 
     lexer->line = 0;
     lexer->column = 0;
+
+    lexer->comment_eol = false;
+    lexer->comment = false;
 
     lexer->stack.cap = INIT_STACK_SIZE;
     lexer->stack.len = 0;
@@ -420,12 +425,48 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
     while (*lexer->ch_current != '\0') {
         printf("%lu, %lu: %c\n", lexer->line, lexer->column, *lexer->ch_current);
         lexer->column++;
-        switch (*lexer->ch_current) {
-        case ' ':
-            break;
-        case '\n':
+
+        if (*lexer->ch_current == '\n') {
+            lexer->comment_eol = false;
             lexer->line++;
             lexer->column = 0;
+            lexer->ch_current++;
+            continue;
+        }
+
+        if (*lexer->ch_current == '\n') {
+            lexer->comment_eol = false;
+            lexer->line++;
+            lexer->column = 0;
+            lexer->ch_current++;
+            continue;
+        }
+
+        if (*lexer->ch_current == '/') {
+            lexer->ch_current++;
+            if (*lexer->ch_current == '/') {
+                lexer->comment_eol = true;
+            } else if (*lexer->ch_current == '*') {
+                lexer->comment = true;
+            } else {
+                // TODO: handle unexpected token
+            }
+        }
+
+        if (*lexer->ch_current == '*' && lexer->comment) {
+            lexer->ch_current++;
+            if (*lexer->ch_current == '/') {
+                lexer->comment = false;
+            }
+        }
+
+        if (lexer->comment || lexer->comment_eol) {
+            lexer->ch_current++;
+            continue;
+        }
+
+        switch (*lexer->ch_current) {
+        case ' ':
             break;
         case '=':
             cfg__lexer_add_token(lexer, CFG_TOKEN_EQ, "=");
@@ -739,9 +780,6 @@ void cfg_destroy(Cfg_Config *cfg)
     cfg__context_free(&cfg->global);
     if (cfg->file != NULL) {
         fclose(cfg->file);
-    }
-    if (cfg->err.message != NULL) {
-        free(cfg->err.message);
     }
     free(cfg);
 }
