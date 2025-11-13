@@ -434,14 +434,6 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
             continue;
         }
 
-        if (*lexer->ch_current == '\n') {
-            lexer->comment_eol = false;
-            lexer->line++;
-            lexer->column = 0;
-            lexer->ch_current++;
-            continue;
-        }
-
         if (*lexer->ch_current == '/') {
             lexer->ch_current++;
             if (*lexer->ch_current == '/') {
@@ -457,6 +449,8 @@ static Cfg_Lexer *cfg__file_tokenize(Cfg_Config *cfg)
             lexer->ch_current++;
             if (*lexer->ch_current == '/') {
                 lexer->comment = false;
+                lexer->ch_current++;
+                continue;
             }
         }
 
