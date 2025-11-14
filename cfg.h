@@ -37,7 +37,8 @@ typedef enum {
     CFG_TYPE_BOOL = 4,
     CFG_TYPE_STRING = 8,
     CFG_TYPE_ARRAY = 16,
-    CFG_TYPE_STRUCT = 32,
+    CFG_TYPE_LIST = 32,
+    CFG_TYPE_STRUCT = 64,
 } Cfg_Type;
 
 typedef struct Cfg_Variable Cfg_Variable;
@@ -64,6 +65,7 @@ double cfg_get_double(Cfg_Variable *ctx, const char *name);
 bool cfg_get_bool(Cfg_Variable *ctx, const char *name);
 char *cfg_get_string(Cfg_Variable *ctx, const char *name);
 Cfg_Variable *cfg_get_array(Cfg_Variable *ctx, const char *name);
+Cfg_Variable *cfg_get_list(Cfg_Variable *ctx, const char *name);
 Cfg_Variable *cfg_get_struct(Cfg_Variable *ctx, const char *name);
 
 int cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res);
@@ -71,6 +73,7 @@ int cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res);
 int cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res);
 int cfg_get_string_safe(Cfg_Variable *ctx, const char *name, char **res);
 int cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
+int cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
 int cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
 
 size_t cfg_get_context_len(Cfg_Variable *ctx);
@@ -80,6 +83,7 @@ double cfg_get_double_elem(Cfg_Variable *ctx, size_t idx);
 bool cfg_get_bool_elem(Cfg_Variable *ctx, size_t idx);
 char *cfg_get_string_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_array_elem(Cfg_Variable *ctx, size_t idx);
+Cfg_Variable *cfg_get_list_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx);
 
 char *cfg_get_error(void);
@@ -104,15 +108,17 @@ typedef enum {
     CFG_TOKEN_COMMA = 4,
     CFG_TOKEN_LEFT_BRACKET = 8,
     CFG_TOKEN_RIGHT_BRACKET = 16,
-    CFG_TOKEN_LEFT_CURLY_BRACKET = 32,
-    CFG_TOKEN_RIGHT_CURLY_BRACKET = 64,
-    CFG_TOKEN_EOF = 128,
+    CFG_TOKEN_LEFT_PARENTHESIS = 32,
+    CFG_TOKEN_RIGHT_PARENTHESIS = 64,
+    CFG_TOKEN_LEFT_CURLY_BRACKET = 128,
+    CFG_TOKEN_RIGHT_CURLY_BRACKET = 256,
+    CFG_TOKEN_EOF = 512,
     // Types with dinamicly allocated values
-    CFG_TOKEN_IDENTIFIER = 256,
-    CFG_TOKEN_INT = 512,
-    CFG_TOKEN_DOUBLE = 1024,
-    CFG_TOKEN_BOOL = 2048,
-    CFG_TOKEN_STRING = 4096,
+    CFG_TOKEN_IDENTIFIER = 1024,
+    CFG_TOKEN_INT = 2048,
+    CFG_TOKEN_DOUBLE = 4096,
+    CFG_TOKEN_BOOL = 8192,
+    CFG_TOKEN_STRING = 16384,
 } Cfg_Token_Type;
 
 typedef struct {
@@ -416,7 +422,7 @@ static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *na
         ctx->vars[ctx->vars_len].value = NULL;
     }
     ctx->vars[ctx->vars_len].prev = ctx;
-    if (type & CFG_TYPE_STRUCT || type & CFG_TYPE_ARRAY) {
+    if (type & CFG_TYPE_STRUCT || type & CFG_TYPE_ARRAY || type & CFG_TYPE_LIST) {
         ctx->vars[ctx->vars_len].vars = cfg__malloc(sizeof(Cfg_Variable) * INIT_VARIABLES_NUM);
         ctx->vars[ctx->vars_len].vars_cap = INIT_VARIABLES_NUM;
         ctx->vars[ctx->vars_len].vars_len = 0;
@@ -544,6 +550,12 @@ static Cfg_Lexer *cfg__file_tokenize(void)
         case ']':
             cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_BRACKET, "]");
             break;
+        case '(':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_PARENTHESIS, "(");
+            break;
+        case ')':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_PARENTHESIS, ")");
+            break;
         case '{':
             cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_CURLY_BRACKET, "{");
             break;
@@ -601,6 +613,8 @@ static Cfg_Lexer *cfg__file_tokenize(void)
                        *lexer->ch_current != ',' &&
                        *lexer->ch_current != '[' &&
                        *lexer->ch_current != ']' &&
+                       *lexer->ch_current != '(' &&
+                       *lexer->ch_current != ')' &&
                        *lexer->ch_current != '{' &&
                        *lexer->ch_current != '}') {
                     lexer->ch_current++;
@@ -631,6 +645,8 @@ static Cfg_Lexer *cfg__file_tokenize(void)
         lexer->column++;
     }
 
+    cfg__lexer_add_token(lexer, CFG_TOKEN_EOF, "\0");
+
     return lexer;
 }
 
@@ -647,7 +663,6 @@ static int cfg__file_parse(void)
     int type = 0;
     char *name = NULL;
     char *value = NULL;
-    int array_type = 0;
     Cfg_Token *tokens = lexer->tokens;
     Cfg_Stack *stack = &lexer->stack;
     Cfg_Variable *ctx = &cfg.global;
@@ -657,6 +672,7 @@ static int cfg__file_parse(void)
             switch (tokens[i].type) {
             case CFG_TOKEN_EQ:
                 expected_token = CFG_TOKEN_LEFT_BRACKET |
+                                 CFG_TOKEN_LEFT_PARENTHESIS |
                                  CFG_TOKEN_LEFT_CURLY_BRACKET |
                                  CFG_TOKEN_INT |
                                  CFG_TOKEN_DOUBLE |
@@ -675,7 +691,7 @@ static int cfg__file_parse(void)
                 }
                 break;
             case CFG_TOKEN_COMMA:
-                if (ctx->vars_len > 1 && type != ctx->vars[0].type) {
+                if (cfg__stack_last_char(stack) == '[' && ctx->vars_len > 1 && type != ctx->vars[0].type) {
                     cfg.err.type = CFG_ERROR_UNEXPECTED_TOKEN;
                     cfg.err.str = "Wrong array member type";
                     cfg.err.line = tokens[i - 1].line;
@@ -689,12 +705,22 @@ static int cfg__file_parse(void)
                 name = NULL;
                 value = NULL;
                 expected_token = CFG_TOKEN_LEFT_BRACKET |
+                                 CFG_TOKEN_LEFT_PARENTHESIS |
                                  CFG_TOKEN_LEFT_CURLY_BRACKET |
                                  CFG_TOKEN_INT |
                                  CFG_TOKEN_DOUBLE |
                                  CFG_TOKEN_BOOL |
-                                 CFG_TOKEN_STRING |
-                                 CFG_TOKEN_RIGHT_BRACKET;
+                                 CFG_TOKEN_STRING;
+                switch (cfg__stack_last_char(stack)) {
+                case '[':
+                    expected_token |= CFG_TOKEN_RIGHT_BRACKET;
+                    break;
+                case '(':
+                    expected_token |= CFG_TOKEN_RIGHT_PARENTHESIS;
+                    break;
+                default:
+                    break;
+                }
                 break;
             case CFG_TOKEN_LEFT_BRACKET:
                 cfg__stack_add_char(stack, '[');
@@ -704,12 +730,13 @@ static int cfg__file_parse(void)
                 name = NULL;
                 ctx = &ctx->vars[ctx->vars_len - 1];
                 expected_token = CFG_TOKEN_LEFT_BRACKET |
+                                 CFG_TOKEN_LEFT_PARENTHESIS |
                                  CFG_TOKEN_LEFT_CURLY_BRACKET |
                                  CFG_TOKEN_INT |
                                  CFG_TOKEN_DOUBLE |
                                  CFG_TOKEN_BOOL |
                                  CFG_TOKEN_STRING |
-                                 CFG_TOKEN_RIGHT_CURLY_BRACKET;
+                                 CFG_TOKEN_RIGHT_BRACKET;
                 break;
             case CFG_TOKEN_RIGHT_BRACKET:
                 if (value != NULL) {
@@ -729,6 +756,44 @@ static int cfg__file_parse(void)
                 switch (cfg__stack_last_char(stack)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
+                    break;
+                case '(':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_PARENTHESIS;
+                    break;
+                default:
+                    expected_token = CFG_TOKEN_SEMICOLON;
+                    break;
+                }
+                break;
+            case CFG_TOKEN_LEFT_PARENTHESIS:
+                cfg__stack_add_char(stack, '(');
+                type = CFG_TYPE_LIST;
+                value = NULL;
+                cfg__context_add_variable(ctx, type, name, value);
+                name = NULL;
+                ctx = &ctx->vars[ctx->vars_len - 1];
+                expected_token = CFG_TOKEN_LEFT_BRACKET |
+                                 CFG_TOKEN_LEFT_PARENTHESIS |
+                                 CFG_TOKEN_LEFT_CURLY_BRACKET |
+                                 CFG_TOKEN_INT |
+                                 CFG_TOKEN_DOUBLE |
+                                 CFG_TOKEN_BOOL |
+                                 CFG_TOKEN_STRING |
+                                 CFG_TOKEN_RIGHT_PARENTHESIS;
+                break;
+            case CFG_TOKEN_RIGHT_PARENTHESIS:
+                if (value != NULL) {
+                    cfg__context_add_variable(ctx, type, name, value);
+                    value = NULL;
+                }
+                cfg__stack_pop_char(stack);
+                ctx = ctx->prev;
+                switch (cfg__stack_last_char(stack)) {
+                case '[':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
+                    break;
+                case '(':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_PARENTHESIS;
                     break;
                 default:
                     expected_token = CFG_TOKEN_SEMICOLON;
@@ -754,6 +819,9 @@ static int cfg__file_parse(void)
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
+                case '(':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_PARENTHESIS;
+                    break;
                 default:
                     expected_token = CFG_TOKEN_SEMICOLON;
                     break;
@@ -770,6 +838,9 @@ static int cfg__file_parse(void)
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
+                case '(':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_PARENTHESIS;
+                    break;
                 default:
                     expected_token = CFG_TOKEN_SEMICOLON;
                     break;
@@ -782,6 +853,9 @@ static int cfg__file_parse(void)
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
+                case '(':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_PARENTHESIS;
+                    break;
                 default:
                     expected_token = CFG_TOKEN_SEMICOLON;
                     break;
@@ -793,6 +867,9 @@ static int cfg__file_parse(void)
                 switch (cfg__stack_last_char(stack)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
+                    break;
+                case '(':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_PARENTHESIS;
                     break;
                 default:
                     expected_token = CFG_TOKEN_SEMICOLON;
@@ -814,11 +891,16 @@ static int cfg__file_parse(void)
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
+                case '(':
+                    expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_PARENTHESIS;
+                    break;
                 default:
                     expected_token = CFG_TOKEN_SEMICOLON;
                     break;
                 }
                 expected_token |= CFG_TOKEN_STRING;
+                break;
+            default:
                 break;
             }
         } else {
@@ -935,6 +1017,17 @@ Cfg_Variable *cfg_get_array(Cfg_Variable *ctx, const char *name)
     return &ctx->vars[i];
 }
 
+Cfg_Variable *cfg_get_list(Cfg_Variable *ctx, const char *name)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_LIST) {
+        return NULL;
+    }
+
+    return &ctx->vars[i];
+}
+
 Cfg_Variable *cfg_get_struct(Cfg_Variable *ctx, const char *name)
 {
     int i = cfg__context_find_variable(ctx, name);
@@ -1018,6 +1111,18 @@ int cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
     return 0;
 }
 
+int cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_LIST) {
+        return 1;
+    }
+
+    *res = &ctx->vars[i];
+    return 0;
+}
+
 int cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
@@ -1082,6 +1187,13 @@ char *cfg_get_string_elem(Cfg_Variable *ctx, size_t idx)
 Cfg_Variable *cfg_get_array_elem(Cfg_Variable *ctx, size_t idx)
 {
     if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_ARRAY) return NULL;
+
+    return &ctx->vars[idx];
+}
+
+Cfg_Variable *cfg_get_list_elem(Cfg_Variable *ctx, size_t idx)
+{
+    if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_LIST) return NULL;
 
     return &ctx->vars[idx];
 }

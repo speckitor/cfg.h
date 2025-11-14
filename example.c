@@ -49,6 +49,18 @@ void print_vars(void)
 
     printf("]\n");
 
+    Cfg_Variable *nested_list = cfg_get_list(nested, "list");
+    printf("\t\tlist = (");
+
+    int list_int = cfg_get_int_elem(nested_list, 0);
+    printf("%d, ", list_int);
+    char *list_string = cfg_get_string_elem(nested_list, 1);
+    printf("%s, ", list_string);
+    double list_double = cfg_get_double_elem(nested_list, 2);
+    printf("%lf, ", list_double);
+    bool list_bool = cfg_get_double_elem(nested_list, 3);
+    printf("%s)\n", list_bool ? "true" : "false");
+
     printf("\t}\n");
 
     printf("}\n");
