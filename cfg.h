@@ -59,13 +59,28 @@ void cfg_unload(void);
 
 Cfg_Variable *cfg_global_context(void);
 
-int cfg_get_int(Cfg_Variable *ctx, const char *name, int *res);
-int cfg_get_double(Cfg_Variable *ctx, const char *name, double *res);
-int cfg_get_bool(Cfg_Variable *ctx, const char *name, bool *res);
-int cfg_get_string(Cfg_Variable *ctx, const char *name, char **res);
-int cfg_get_array(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
-int cfg_get_struct(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
-size_t cfg_get_context_size(Cfg_Variable *ctx);
+int cfg_get_int(Cfg_Variable *ctx, const char *name);
+double cfg_get_double(Cfg_Variable *ctx, const char *name);
+bool cfg_get_bool(Cfg_Variable *ctx, const char *name);
+char *cfg_get_string(Cfg_Variable *ctx, const char *name);
+Cfg_Variable *cfg_get_array(Cfg_Variable *ctx, const char *name);
+Cfg_Variable *cfg_get_struct(Cfg_Variable *ctx, const char *name);
+
+int cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res);
+int cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res);
+int cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res);
+int cfg_get_string_safe(Cfg_Variable *ctx, const char *name, char **res);
+int cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
+int cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
+
+size_t cfg_get_context_len(Cfg_Variable *ctx);
+
+int cfg_get_int_elem(Cfg_Variable *ctx, size_t idx);
+double cfg_get_double_elem(Cfg_Variable *ctx, size_t idx);
+bool cfg_get_bool_elem(Cfg_Variable *ctx, size_t idx);
+char *cfg_get_string_elem(Cfg_Variable *ctx, size_t idx);
+Cfg_Variable *cfg_get_array_elem(Cfg_Variable *ctx, size_t idx);
+Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx);
 
 char *cfg_get_error(void);
 
@@ -849,55 +864,125 @@ Cfg_Variable *cfg_global_context(void)
     return &cfg.global;
 }
 
-int cfg_get_int(Cfg_Variable *ctx, const char *name, int *res)
+int cfg_get_int(Cfg_Variable *ctx, const char *name)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1) {
-        return 1;
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_INT) {
+        return 0;
     }
 
-    if (ctx->vars[i].type != CFG_TYPE_INT) {
-        return 2;
+    int res;
+
+    if (sscanf(ctx->vars[i].value, "%d", &res) != 1) {
+        return 0;
+    }
+
+    return res;
+}
+
+double cfg_get_double(Cfg_Variable *ctx, const char *name)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_DOUBLE) {
+        return 0.0;
+    }
+
+    double res;
+
+    if (sscanf(ctx->vars[i].value, "%lf", &res) != 1) {
+        return 0.0;
+    }
+
+    return res;
+}
+
+bool cfg_get_bool(Cfg_Variable *ctx, const char *name)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_BOOL) {
+        return false;
+    }
+
+    if (strcmp(ctx->vars[i].value, "true") == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+char *cfg_get_string(Cfg_Variable *ctx, const char *name)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_STRING) {
+        return NULL;
+    }
+
+    return ctx->vars[i].value;
+}
+
+Cfg_Variable *cfg_get_array(Cfg_Variable *ctx, const char *name)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_ARRAY) {
+        return NULL;
+    }
+
+    return &ctx->vars[i];
+}
+
+Cfg_Variable *cfg_get_struct(Cfg_Variable *ctx, const char *name)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_STRUCT) {
+        return NULL;
+    }
+
+    return &ctx->vars[i];
+}
+
+int cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_INT) {
+        return 1;
     }
 
     if (sscanf(ctx->vars[i].value, "%d", res) != 1) {
-        return 3;
+        return 1;
     }
 
     return 0;
 }
 
 
-int cfg_get_double(Cfg_Variable *ctx, const char *name, double *res)
+int cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1) {
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_DOUBLE) {
         return 1;
-    }
-
-    if (ctx->vars[i].type != CFG_TYPE_DOUBLE) {
-        return 2;
     }
 
     if (sscanf(ctx->vars[i].value, "%lf", res) != 1) {
-        return 3;
+        return 1;
     }
 
     return 0;
 }
 
-int cfg_get_bool(Cfg_Variable *ctx, const char *name, bool *res)
+int cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1) {
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_BOOL) {
         return 1;
-    }
-
-    if (ctx->vars[i].type != CFG_TYPE_BOOL) {
-        return 2;
     }
 
     if (strcmp(ctx->vars[i].value, "true") == 0) {
@@ -905,60 +990,107 @@ int cfg_get_bool(Cfg_Variable *ctx, const char *name, bool *res)
     } else {
         *res = false;
     }
+
     return 0;
 }
 
-int cfg_get_string(Cfg_Variable *ctx, const char *name, char **res)
+int cfg_get_string_safe(Cfg_Variable *ctx, const char *name, char **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1) {
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_STRING) {
         return 1;
-    }
-
-    if (ctx->vars[i].type != CFG_TYPE_STRING) {
-        return 2;
     }
 
     *res = ctx->vars[i].value;
     return 0;
 }
 
-int cfg_get_array(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
+int cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1) {
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_ARRAY) {
         return 1;
-    }
-
-    if (ctx->vars[i].type != CFG_TYPE_ARRAY) {
-        return 2;
     }
 
     *res = &ctx->vars[i];
     return 0;
 }
 
-int cfg_get_struct(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
+int cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1) {
+    if (i == -1 || ctx->vars[i].type != CFG_TYPE_STRUCT) {
         return 1;
-    }
-
-    if (ctx->vars[i].type != CFG_TYPE_STRUCT) {
-        return 2;
     }
 
     *res = &ctx->vars[i];
     return 0;
 }
 
-size_t cfg_get_context_size(Cfg_Variable *ctx)
+size_t cfg_get_context_len(Cfg_Variable *ctx)
 {
     return ctx->vars_len;
+}
+
+int cfg_get_int_elem(Cfg_Variable *ctx, size_t idx)
+{
+    if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_INT) return 0;
+
+    int res;
+
+    if (sscanf(ctx->vars[idx].value, "%d", &res) != 1) {
+        return 0;
+    }
+
+    return res;
+}
+
+double cfg_get_double_elem(Cfg_Variable *ctx, size_t idx)
+{
+    if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_DOUBLE) return 0.0;
+
+    double res;
+
+    if (sscanf(ctx->vars[idx].value, "%lf", &res) != 1) {
+        return 0;
+    }
+
+    return res;
+}
+
+bool cfg_get_bool_elem(Cfg_Variable *ctx, size_t idx)
+{
+    if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_BOOL) return false;
+
+    if (strcmp(ctx->vars[idx].value, "true") == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+char *cfg_get_string_elem(Cfg_Variable *ctx, size_t idx)
+{
+    if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_STRING) return NULL;
+
+    return ctx->vars[idx].value;
+}
+
+Cfg_Variable *cfg_get_array_elem(Cfg_Variable *ctx, size_t idx)
+{
+    if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_ARRAY) return NULL;
+
+    return &ctx->vars[idx];
+}
+
+Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx)
+{
+    if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_STRUCT) return NULL;
+
+    return &ctx->vars[idx];
 }
 
 char *cfg_get_error(void)

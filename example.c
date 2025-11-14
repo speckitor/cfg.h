@@ -5,67 +5,49 @@
 
 void print_vars(void)
 {
-    int res;
-
-    int number;
-    double floating;
-    bool boolean;
-    char *string;
-
-    Cfg_Variable *structure;
-    int structure_a;
-    int structure_b;
-
-    Cfg_Variable *structure_nested;
-    double structure_nested_double;
-    Cfg_Variable *structure_nested_list;
-
     Cfg_Variable *global = cfg_global_context();
 
-    res = cfg_get_int(global, "number", &number);
-    if (res == 0) {
-        printf("number = %d\n", number);
+    int number = cfg_get_int(global, "number");
+    printf("number = %d;\n", number);
+
+    double Double = cfg_get_double(global, "double");
+    printf("double = %lf;\n", Double);
+
+    bool boolean = cfg_get_bool(global, "boolean");
+    printf("boolean = %s;\n", boolean ? "true" : "false");
+
+    char *string = cfg_get_string(global, "string");
+    printf("string = %s;\n", string);
+
+    Cfg_Variable *structure = cfg_get_struct(global, "structure");
+    printf("structure = {\n");
+
+    int structure_a = cfg_get_int(structure, "a");
+    printf("\ta = %d;\n", structure_a);
+
+    int structure_b = cfg_get_int(structure, "b");
+    printf("\tb = %d;\n", structure_a);
+
+    Cfg_Variable *nested = cfg_get_struct(structure, "nested");
+    printf("\tnested = {\n");
+
+    double nested_double = cfg_get_double(nested, "double");
+    printf("\t\tdouble = %lf;\n", nested_double);
+
+    Cfg_Variable *nested_ints = cfg_get_array(nested, "ints");
+    printf("\t\tints = [");
+
+    int tmp;
+    size_t ints_len = cfg_get_context_len(nested_ints);
+    for (size_t i = 0; i < ints_len; ++i) {
+        tmp = cfg_get_int_elem(nested_ints, i);
+        printf("%d", tmp);
+        if (i + 1 < ints_len) {
+            printf(", ");
+        }
     }
 
-    res = cfg_get_double(global, "floating", &floating);
-    if (res == 0) {
-        printf("floating = %lf\n", floating);
-    }
-
-    cfg_get_bool(global, "boolean", &boolean);
-    if (res == 0) {
-        printf("boolean = %s\n", boolean ? "true" : "false");
-    }
-
-    cfg_get_string(global, "string", &string);
-    if (res == 0) {
-        printf("string = %s\n", string);
-    }
-
-    cfg_get_struct(global, "structure", &structure);
-    if (res == 0) {
-        printf("structure = {\n");
-    }
-
-    cfg_get_int(structure, "a", &structure_a);
-    if (res == 0) {
-        printf("\ta = %d\n", structure_a);
-    }
-
-    cfg_get_int(structure, "b", &structure_b);
-    if (res == 0) {
-        printf("\tb = %d\n", structure_b);
-    }
-
-    cfg_get_struct(structure, "nested", &structure_nested);
-    if (res == 0) {
-        printf("\tnested = {\n");
-    }
-
-    cfg_get_double(structure_nested, "double", &structure_nested_double);
-    if (res == 0) {
-        printf("\t\tb = %lf\n", structure_nested_double);
-    }
+    printf("]\n");
 
     printf("\t}\n");
 
@@ -80,6 +62,8 @@ int main(void)
         cfg_unload();
         return 1;
     }
+
+    print_vars();
 
     cfg_unload();
 
