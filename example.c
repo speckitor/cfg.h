@@ -3,7 +3,7 @@
 #define CFG_IMPLEMENTATION
 #include "cfg.h"
 
-void print_vars(Cfg_Config *cfg)
+void print_vars(void)
 {
     int res;
 
@@ -18,8 +18,9 @@ void print_vars(Cfg_Config *cfg)
 
     Cfg_Variable *structure_nested;
     double structure_nested_double;
+    Cfg_Variable *structure_nested_list;
 
-    Cfg_Variable *global = cfg_global_context(cfg);
+    Cfg_Variable *global = cfg_global_context();
 
     res = cfg_get_int(global, "number", &number);
     if (res == 0) {
@@ -66,20 +67,21 @@ void print_vars(Cfg_Config *cfg)
         printf("\t\tb = %lf\n", structure_nested_double);
     }
 
-    printf("\t}\n", structure_nested_double);
+    printf("\t}\n");
 
-    printf("}\n", structure_nested_double);
+    printf("}\n");
 }
 
 int main(void)
 {
-    Cfg_Config *cfg = cfg_init();
+    int res = cfg_load_file("./example.cfg");
+    if (res != 0) {
+        printf("%s\n", cfg_get_error());
+        cfg_unload();
+        return 1;
+    }
 
-    cfg_load_file(cfg, "./example.cfg");
-
-    print_vars(cfg);
-
-    cfg_destroy(cfg);
+    cfg_unload();
 
     return 0;
 }
