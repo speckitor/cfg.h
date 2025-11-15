@@ -6,9 +6,13 @@
 void print_vars(void)
 {
     // Getting global variables context
+    // To describe a space that contains varables the word `context` is used
     Cfg_Variable *global = cfg_global_context();
 
-    // Example of get function, if there is no variable with provided name
+    // Getting int, double, bool and string variables
+    //
+    // cfg_get_<type_name> functions return a value of specified name in provided context
+    // If there is no variable with provided name
     // these functions return 0/0.0/NULL/false (depending on return type)
     int number = cfg_get_int(global, "number");
     printf("number = %d;\n", number);
@@ -22,25 +26,33 @@ void print_vars(void)
     char *string = cfg_get_string(global, "string");
     printf("string = %s;\n", string);
 
-    // Safe versions of get functions
-    // will return 0 if variable is found and parsed successfully
-    // will return 1 if variable is not found or cannot be parsed
-    // int number = cfg_get_int(global, "number");
-    // printf("number = %d;\n", number);
-
-    // double Double = cfg_get_double(global, "double");
-    // printf("double = %lf;\n", Double);
-
-    // bool boolean = cfg_get_bool(global, "boolean");
-    // printf("boolean = %s;\n", boolean ? "true" : "false");
-
-    // char *string = cfg_get_string(global, "string");
-    // printf("string = %s;\n", string);
-
     // Getting arrays, lists and structs
+    //
+    // To get array, list or struct use get functions
+    // which return context (Cfg_Variable *) to array, list or struct if it exists or NULL if not
+    // You can use that context to get variables inside of it.
+    //
+    // cfg_get_context_len returns the number of variables inside of the context.
+    // cfg_get_<type_name>_elem can be used to get variables by index
+
+    // Arrays use brackets and can contain only variables of one type
     Cfg_Variable *array = cfg_get_array(global, "array");
+    printf("array = [");
+
+    int array_el;
+    size_t array_len = cfg_get_context_len(array);
+    for (size_t i = 0; i < array_len; ++i) {
+        array_el = cfg_get_int_elem(array, i);
+        printf("%d", array_el);
+        if (i + 1 < array_len) {
+            printf(", ");
+        }
+    }
+
+    printf("];\n");
 
     Cfg_Variable *structure = cfg_get_struct(global, "structure");
+
     printf("structure = {\n");
 
     int structure_a = cfg_get_int(structure, "a");
@@ -85,6 +97,11 @@ void print_vars(void)
     printf("\t};\n");
 
     printf("};\n");
+}
+
+void print_vars_safe(void)
+{
+
 }
 
 int main(void)

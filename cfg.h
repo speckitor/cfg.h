@@ -32,6 +32,7 @@
 #include <string.h>
 
 typedef enum {
+    CFG_TYPE_NONE = 0,
     CFG_TYPE_INT = 1,
     CFG_TYPE_DOUBLE = 2,
     CFG_TYPE_BOOL = 4,
@@ -97,6 +98,9 @@ char *cfg_get_string_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_array_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_list_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx);
+
+Cfg_Type cfg_get_type(Cfg_Variable *ctx, const char *name);
+Cfg_Type cfg_get_type_elem(Cfg_Variable *ctx, size_t idx);
 
 Cfg_Error_Type cfg_get_error_type(void);
 char *cfg_get_error_message(void);
@@ -1347,6 +1351,22 @@ Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx)
     if (idx >= ctx->vars_len || ctx->vars[idx].type != CFG_TYPE_STRUCT) return NULL;
 
     return &ctx->vars[idx];
+}
+
+Cfg_Type cfg_get_type(Cfg_Variable *ctx, const char *name)
+{
+    int i = cfg__context_find_variable(ctx, name);
+
+    if (i == -1) return CFG_TYPE_NONE;
+
+    return ctx->vars[i].type;
+}
+
+Cfg_Type cfg_get_type_elem(Cfg_Variable *ctx, size_t idx)
+{
+    if (i >= ctx->vars_len) return CFG_TYPE_NONE;
+
+    return ctx->vars[i].type;
 }
 
 Cfg_Error_Type cfg_get_error_type(void)
