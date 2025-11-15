@@ -1,2 +1,4 @@
+CC=gcc
+
 example: example.c
-	gcc -o example example.c -ggdb
+	$(CC) -o example example.c
