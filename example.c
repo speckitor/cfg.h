@@ -5,8 +5,11 @@
 
 void print_vars(void)
 {
+    // Getting global variables context
     Cfg_Variable *global = cfg_global_context();
 
+    // Example of get function, if there is no variable with provided name
+    // these functions return 0/0.0/NULL/false (depending on return type)
     int number = cfg_get_int(global, "number");
     printf("number = %d;\n", number);
 
@@ -18,6 +21,24 @@ void print_vars(void)
 
     char *string = cfg_get_string(global, "string");
     printf("string = %s;\n", string);
+
+    // Safe versions of get functions
+    // will return 0 if variable is found and parsed successfully
+    // will return 1 if variable is not found or cannot be parsed
+    // int number = cfg_get_int(global, "number");
+    // printf("number = %d;\n", number);
+
+    // double Double = cfg_get_double(global, "double");
+    // printf("double = %lf;\n", Double);
+
+    // bool boolean = cfg_get_bool(global, "boolean");
+    // printf("boolean = %s;\n", boolean ? "true" : "false");
+
+    // char *string = cfg_get_string(global, "string");
+    // printf("string = %s;\n", string);
+
+    // Getting arrays, lists and structs
+    Cfg_Variable *array = cfg_get_array(global, "array");
 
     Cfg_Variable *structure = cfg_get_struct(global, "structure");
     printf("structure = {\n");
@@ -47,7 +68,7 @@ void print_vars(void)
         }
     }
 
-    printf("]\n");
+    printf("];\n");
 
     Cfg_Variable *nested_list = cfg_get_list(nested, "list");
     printf("\t\tlist = (");
@@ -59,18 +80,18 @@ void print_vars(void)
     double list_double = cfg_get_double_elem(nested_list, 2);
     printf("%lf, ", list_double);
     bool list_bool = cfg_get_double_elem(nested_list, 3);
-    printf("%s)\n", list_bool ? "true" : "false");
+    printf("%s);\n", list_bool ? "true" : "false");
 
-    printf("\t}\n");
+    printf("\t};\n");
 
-    printf("}\n");
+    printf("};\n");
 }
 
 int main(void)
 {
     int res = cfg_load_file("./example.cfg");
     if (res != 0) {
-        printf("%s\n", cfg_get_error());
+        printf("%s\n", cfg_get_error_message());
         cfg_unload();
         return 1;
     }

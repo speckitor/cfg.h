@@ -41,6 +41,18 @@ typedef enum {
     CFG_TYPE_STRUCT = 64,
 } Cfg_Type;
 
+typedef enum {
+    CFG_ERROR_NONE = 0,
+    CFG_ERROR_OPEN_FILE,
+    CFG_ERROR_UNKNOWN_TOKEN,
+    CFG_ERROR_UNEXPECTED_TOKEN,
+    CFG_ERROR_VARIABLE_REDEFINITION,
+    CFG_ERROR_VARIABLE_NOT_FOUND,
+    CFG_ERROR_VARIABLE_WRONG_TYPE,
+    CFG_ERROR_VARIABLE_PARSE,
+    CFG_ERROR_COUNT,
+} Cfg_Error_Type;
+
 typedef struct Cfg_Variable Cfg_Variable;
 
 struct Cfg_Variable {
@@ -86,10 +98,10 @@ Cfg_Variable *cfg_get_array_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_list_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx);
 
-char *cfg_get_error(void);
+Cfg_Error_Type cfg_get_error_type(void);
+char *cfg_get_error_message(void);
 
 #endif // CFG_H_
-
 
 #ifdef CFG_IMPLEMENTATION
 
@@ -149,21 +161,9 @@ typedef struct {
     Cfg_Stack stack;
 } Cfg_Lexer;
 
-typedef enum {
-    CFG_ERROR_NONE = 0,
-    CFG_ERROR_OPEN_FILE,
-    CFG_ERROR_UNKNOWN_TOKEN,
-    CFG_ERROR_UNEXPECTED_TOKEN,
-    CFG_ERROR_VARIABLE_REDEFINITION,
-    CFG_ERROR_COUNT,
-} Cfg_Error_Type;
-
 typedef struct {
     char *message;
     Cfg_Error_Type type;
-    char *str;
-    size_t line;
-    size_t column;
 } Cfg_Error;
 
 typedef struct {
@@ -215,8 +215,7 @@ static void cfg__config_create(void)
     cfg.global.vars_len = 0;
     cfg.global.vars_cap = INIT_VARIABLES_NUM;
     cfg.err.type = CFG_ERROR_NONE;
-    cfg.err.message = NULL;
-    cfg.err.str = NULL;
+    cfg.err.message = cfg__malloc(sizeof(char) * ERROR_MESSAGE_SIZE);
 }
 
 static void cfg__config_free(void)
@@ -295,11 +294,7 @@ static void cfg__lexer_add_token(Cfg_Token_Type type, char *value)
     lexer.tokens[idx].type = type;
     lexer.tokens[idx].value = value;
     lexer.tokens[idx].line = lexer.line;
-    if (strlen(value) > 1) {
-        lexer.tokens[idx].column = lexer.column - strlen(value);
-    } else {
-        lexer.tokens[idx].column = lexer.column;
-    }
+    lexer.tokens[idx].column = lexer.column - strlen(value);
 }
 
 static void cfg__stack_add_char(char ch)
@@ -416,11 +411,10 @@ static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *na
         for (size_t i = 0; i < ctx->vars_len; ++i) {
             if (strcmp(name, ctx->vars[i].name) == 0) {
                 cfg.err.type = CFG_ERROR_VARIABLE_REDEFINITION;
-                cfg.err.message = malloc(sizeof(char) * ERROR_MESSAGE_SIZE);
                 if (ctx->name != NULL) {
-                    sprintf(cfg.err.message, "Redefinded variable `%s` inside `%s`", name, ctx->name);
+                    sprintf(cfg.err.message, "Redefined variable `%s` inside `%s` at line:%lu, column:%lu", name, ctx->name, lexer.tokens[lexer.cur_token - 3].line, lexer.tokens[lexer.cur_token - 3].column);
                 } else {
-                    sprintf(cfg.err.message, "Redefinded variable `%s`", name);
+                    sprintf(cfg.err.message, "Redefined variable `%s` at line:%lu, column:%lu", name, lexer.tokens[lexer.cur_token - 3].line, lexer.tokens[lexer.cur_token - 3].column);
                 }
                 return;
             }
@@ -474,7 +468,7 @@ static int cfg__file_open(const char *file_path)
     FILE *file = fopen(file_path, "r");
     if (file == NULL) {
         cfg.err.type = CFG_ERROR_OPEN_FILE;
-        cfg.err.str = "Failed to open file";
+        sprintf(cfg.err.message, "Failed to open file: %s", file_path);
         return 1;
     }
     cfg.file = file;
@@ -520,9 +514,7 @@ static void cfg__file_tokenize(void)
                 continue;
             } else {
                 cfg.err.type = CFG_ERROR_UNKNOWN_TOKEN;
-                cfg.err.str = "Unknown token";
-                cfg.err.line = lexer.line;
-                cfg.err.column = lexer.column;
+                sprintf(cfg.err.message, "Unknown token at line:%lu, column:%lu", lexer.line, lexer.column);
                 cfg__lexer_free();
                 return;
             }
@@ -592,9 +584,7 @@ static void cfg__file_tokenize(void)
 
                 if (dots > 1) {
                     cfg.err.type = CFG_ERROR_UNKNOWN_TOKEN;
-                    cfg.err.str = "Unknown token";
-                    cfg.err.line = lexer.line;
-                    cfg.err.column = lexer.column;
+                    sprintf(cfg.err.message, "Unknown token at line:%lu, column:%lu", lexer.line, lexer.column);
                     cfg__lexer_free();
                     return;
                 }
@@ -704,11 +694,9 @@ static int cfg__file_parse(void)
                 }
                 break;
             case CFG_TOKEN_COMMA:
-                if (cfg__stack_last_char() == '[' && ctx->vars_len > 1 && type != ctx->vars[0].type) {
+                if (cfg__stack_last_char() == '[' && ctx->vars_len > 0 && type != ctx->vars[0].type) {
                     cfg.err.type = CFG_ERROR_UNEXPECTED_TOKEN;
-                    cfg.err.str = "Wrong array member type";
-                    cfg.err.line = tokens[i - 1].line;
-                    cfg.err.column = tokens[i - 1].column;
+                    sprintf(cfg.err.message, "Wrong array member type line:%lu, column:%lu", tokens[i - 1].line, tokens[i - 1].column);
                     cfg__lexer_free();
                     return 1;
                 };
@@ -763,9 +751,7 @@ static int cfg__file_parse(void)
                 if (value != NULL) {
                     if (type != ctx->vars[0].type) {
                         cfg.err.type = CFG_ERROR_UNEXPECTED_TOKEN;
-                        cfg.err.str = "Wrong array member type";
-                        cfg.err.line = tokens[i - 1].line;
-                        cfg.err.column = tokens[i - 1].column;
+                        sprintf(cfg.err.message, "Wrong array member type at line:%lu, column%lu", tokens[i - 1].line, tokens[i - 1].column);
                         cfg__lexer_free();
                         return 1;
                     };
@@ -942,9 +928,7 @@ static int cfg__file_parse(void)
             }
         } else {
             cfg.err.type = CFG_ERROR_UNEXPECTED_TOKEN;
-            cfg.err.str = "Unexpected token";
-            cfg.err.line = tokens[i].line;
-            cfg.err.column = tokens[i].column;
+            sprintf(cfg.err.message, "Unexpected token at line:%lu, column:%lu", tokens[i].line, tokens[i].column);
             cfg__lexer_free();
             return 1;
         }
@@ -1080,27 +1064,70 @@ int cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1 || ctx->vars[i].type != CFG_TYPE_INT) {
+    if (i == -1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` not found", name);
+        }
+        return 1;
+    }
+
+    if (ctx->vars[i].type != CFG_TYPE_INT) {
+        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` in `%s` is not int", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` is not int", name);
+        }
         return 1;
     }
 
     if (sscanf(ctx->vars[i].value, "%d", res) != 1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_PARSE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Failed to parse variable `%s` in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Failed to parse variable `%s`", name);
+        }
         return 1;
     }
 
     return 0;
 }
 
-
 int cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1 || ctx->vars[i].type != CFG_TYPE_DOUBLE) {
+    if (i == -1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` not found", name);
+        }
+        return 1;
+    }
+
+    if (ctx->vars[i].type != CFG_TYPE_DOUBLE) {
+        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` in `%s` is not double", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` is not double", name);
+        }
         return 1;
     }
 
     if (sscanf(ctx->vars[i].value, "%lf", res) != 1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_PARSE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Failed to parse variable `%s` in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Failed to parse variable `%s`", name);
+        }
         return 1;
     }
 
@@ -1111,7 +1138,23 @@ int cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1 || ctx->vars[i].type != CFG_TYPE_BOOL) {
+    if (i == -1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` not found", name);
+        }
+        return 1;
+    }
+
+    if (ctx->vars[i].type != CFG_TYPE_BOOL) {
+        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` in `%s` is not bool", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` is not bool", name);
+        }
         return 1;
     }
 
@@ -1128,7 +1171,23 @@ int cfg_get_string_safe(Cfg_Variable *ctx, const char *name, char **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1 || ctx->vars[i].type != CFG_TYPE_STRING) {
+    if (i == -1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` not found", name);
+        }
+        return 1;
+    }
+
+    if (ctx->vars[i].type != CFG_TYPE_STRING) {
+        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` in `%s` is not string", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` is not string", name);
+        }
         return 1;
     }
 
@@ -1140,7 +1199,23 @@ int cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1 || ctx->vars[i].type != CFG_TYPE_ARRAY) {
+    if (i == -1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` not found", name);
+        }
+        return 1;
+    }
+
+    if (ctx->vars[i].type != CFG_TYPE_ARRAY) {
+        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` in `%s` is not array", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` is not array", name);
+        }
         return 1;
     }
 
@@ -1152,7 +1227,23 @@ int cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1 || ctx->vars[i].type != CFG_TYPE_LIST) {
+    if (i == -1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` not found", name);
+        }
+        return 1;
+    }
+
+    if (ctx->vars[i].type != CFG_TYPE_LIST) {
+        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` in `%s` is not list", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` is not list", name);
+        }
         return 1;
     }
 
@@ -1164,7 +1255,23 @@ int cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
-    if (i == -1 || ctx->vars[i].type != CFG_TYPE_STRUCT) {
+    if (i == -1) {
+        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` not found", name);
+        }
+        return 1;
+    }
+
+    if (ctx->vars[i].type != CFG_TYPE_STRUCT) {
+        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        if (ctx->name != NULL) {
+            sprintf(cfg.err.message, "Variable `%s` in `%s` is not struct", name, ctx->name);
+        } else {
+            sprintf(cfg.err.message, "Variable `%s` is not struct", name);
+        }
         return 1;
     }
 
@@ -1242,21 +1349,14 @@ Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx)
     return &ctx->vars[idx];
 }
 
-char *cfg_get_error(void)
+Cfg_Error_Type cfg_get_error_type(void)
+{
+    return cfg.err.type;
+}
+
+char *cfg_get_error_message(void)
 {
     if (cfg.err.type == CFG_ERROR_NONE) return NULL;
-
-    if (cfg.err.type == CFG_ERROR_VARIABLE_REDEFINITION) return cfg.err.message;
-
-    if (cfg.err.message == NULL) {
-        cfg.err.message = malloc(sizeof(char) * ERROR_MESSAGE_SIZE);
-    }
-
-    if (cfg.err.type == CFG_ERROR_OPEN_FILE) {
-        sprintf(cfg.err.message, "%s", cfg.err.str);
-    } else {
-        sprintf(cfg.err.message, "%s at line:%lu column:%lu", cfg.err.str, cfg.err.line, cfg.err.column);
-    }
 
     return cfg.err.message;
 }
