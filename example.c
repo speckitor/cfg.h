@@ -112,6 +112,7 @@ int main(void)
         cfg_unload();
         return 1;
     }
+    cfg_load_file("./example.cfg");
 
     print_vars();
 

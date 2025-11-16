@@ -1,18 +1,18 @@
 /*
  *  MIT License
- *  
+ *
  *  Copyright (c) 2025 Pavel Loginov
- *  
+ *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
  *  in the Software without restriction, including without limitation the rights
  *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  *  copies of the Software, and to permit persons to whom the Software is
  *  furnished to do so, subject to the following conditions:
- *  
+ *
  *  The above copyright notice and this permission notice shall be included in all
  *  copies or substantial portions of the Software.
- *  
+ *
  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -31,8 +31,9 @@
 #include <stdbool.h>
 #include <string.h>
 
+// Supported variable types
 typedef enum {
-    CFG_TYPE_NONE = 0,
+    CFG_TYPE_NONE = 0, // If variable does not exist
     CFG_TYPE_INT = 1,
     CFG_TYPE_DOUBLE = 2,
     CFG_TYPE_BOOL = 4,
@@ -42,6 +43,7 @@ typedef enum {
     CFG_TYPE_STRUCT = 64,
 } Cfg_Type;
 
+// Error types
 typedef enum {
     CFG_ERROR_NONE = 0,
     CFG_ERROR_OPEN_FILE,
@@ -66,13 +68,35 @@ struct Cfg_Variable {
     size_t vars_cap;
 };
 
-// Public API function declarations
+// Public API functions declaration
 
+// Loading file, returns 0 on success and 1 on fail
+// If another file is already loaded it will automaticly unload it
 int cfg_load_file(const char *file_path);
+// Unload should be called to free allocated memory
+// Make sure not to use any pointer after unloading (strings, arrays, lists, structs)
+// If you want to save strings after unloading file you can use `strdup`
 void cfg_unload(void);
 
+// Get global context in file
 Cfg_Variable *cfg_global_context(void);
 
+// Get length of context
+// Returns amount of inner variables
+size_t cfg_get_context_len(Cfg_Variable *ctx);
+
+// Get variable type by context and name/index
+// Return CFG_TYPE_NONE on error
+Cfg_Type cfg_get_type(Cfg_Variable *ctx, const char *name);
+Cfg_Type cfg_get_type_elem(Cfg_Variable *ctx, size_t idx);
+
+// Error information
+Cfg_Error_Type cfg_get_error_type(void);
+char *cfg_get_error_message(void);
+
+// Get variables from provided context
+// Context can be global or local (array, list, struct)
+// Returns 0/0.0/false/NULL on error
 int cfg_get_int(Cfg_Variable *ctx, const char *name);
 double cfg_get_double(Cfg_Variable *ctx, const char *name);
 bool cfg_get_bool(Cfg_Variable *ctx, const char *name);
@@ -81,6 +105,9 @@ Cfg_Variable *cfg_get_array(Cfg_Variable *ctx, const char *name);
 Cfg_Variable *cfg_get_list(Cfg_Variable *ctx, const char *name);
 Cfg_Variable *cfg_get_struct(Cfg_Variable *ctx, const char *name);
 
+// Safe verstions of functions above
+// Return 0 on success, 1 on error
+// To get more information about error see `cfg_get_error_type` and `cfg_get_error_message`
 int cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res);
 int cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res);
 int cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res);
@@ -89,8 +116,8 @@ int cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
 int cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
 int cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
 
-size_t cfg_get_context_len(Cfg_Variable *ctx);
-
+// Get variables by index
+// Return 0/0.0/false/NULL on error
 int cfg_get_int_elem(Cfg_Variable *ctx, size_t idx);
 double cfg_get_double_elem(Cfg_Variable *ctx, size_t idx);
 bool cfg_get_bool_elem(Cfg_Variable *ctx, size_t idx);
@@ -98,12 +125,6 @@ char *cfg_get_string_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_array_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_list_elem(Cfg_Variable *ctx, size_t idx);
 Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx);
-
-Cfg_Type cfg_get_type(Cfg_Variable *ctx, const char *name);
-Cfg_Type cfg_get_type_elem(Cfg_Variable *ctx, size_t idx);
-
-Cfg_Error_Type cfg_get_error_type(void);
-char *cfg_get_error_message(void);
 
 #endif // CFG_H_
 
@@ -179,30 +200,41 @@ typedef struct {
 static Cfg_Config cfg;
 static Cfg_Lexer lexer;
 
-// Private functions forward declarations
+// Private functions forward declaration
 
+// Custom malloc and realloc functions
 static void *cfg__malloc(size_t size);
 static void *cfg__realloc(void *prev, size_t size);
 
+// Cfg_Config create and free
 static void cfg__config_create(void);
 static void cfg__config_free(void);
 
+// Cfg_Lexer create and free
 static void cfg__lexer_create(void);
 static void cfg__lexer_free(void);
 
+// Functions for parsing string from file
 static void cfg__string_add_char(char **str, size_t *cap, char ch);
 static char *cfg__lexer_parse_string(void);
 
+// Add token to lexer
 static void cfg__lexer_add_token(Cfg_Token_Type type, char *value);
 
+// Stack functions for brakets and parenthesis evaluation
 static void cfg__stack_add_char(char ch);
 static void cfg__stack_pop_char(void);
 static char cfg__stack_last_char(void);
 
+// Cfg_Variable functions to add variable, free context or find variable
+// `cfg__context_find_variable` return -1 on error
 static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *name, char *value);
 static void cfg__context_free(Cfg_Variable *ctx);
 static int cfg__context_find_variable(Cfg_Variable *ctx, const char *name);
 
+// File functions
+// `cfg__file_open` and `cfg__file_parse` return 1 on error and 0 on success
+// `cfg__file_get_str` return NULL on error and pointer to allocated string on success
 static int cfg__file_open(const char *file_path);
 static char *cfg__file_get_str(void);
 static void cfg__file_tokenize(void);
@@ -1364,9 +1396,9 @@ Cfg_Type cfg_get_type(Cfg_Variable *ctx, const char *name)
 
 Cfg_Type cfg_get_type_elem(Cfg_Variable *ctx, size_t idx)
 {
-    if (i >= ctx->vars_len) return CFG_TYPE_NONE;
+    if (idx >= ctx->vars_len) return CFG_TYPE_NONE;
 
-    return ctx->vars[i].type;
+    return ctx->vars[idx].type;
 }
 
 Cfg_Error_Type cfg_get_error_type(void)
