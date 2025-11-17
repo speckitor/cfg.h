@@ -1,4 +1,7 @@
 /*
+ * cfg.h version 0.1.0
+ * public domain - https://github.com/speckitor/cfg.h
+ *
  *  MIT License
  *
  *  Copyright (c) 2025 Pavel Loginov
@@ -84,6 +87,11 @@ Cfg_Variable *cfg_global_context(void);
 // Get length of context
 // Returns amount of inner variables
 size_t cfg_get_context_len(Cfg_Variable *ctx);
+
+// Get variable name by index in context
+// Can be useful if you want to get all names in structure
+// Will return NULL if variable is inside of array/list
+char *cfg_get_name(Cfg_Variable *ctx, size_t idx);
 
 // Get variable type by context and name/index
 // Return CFG_TYPE_NONE on error
@@ -1331,6 +1339,13 @@ int cfg_get_int_elem(Cfg_Variable *ctx, size_t idx)
     }
 
     return res;
+}
+
+char *cfg_get_name(Cfg_Variable *ctx, size_t idx)
+{
+    if (idx >= ctx->vars_len) return NULL;
+
+    return ctx->vars[idx].name;
 }
 
 double cfg_get_double_elem(Cfg_Variable *ctx, size_t idx)

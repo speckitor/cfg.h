@@ -51,6 +51,7 @@ void print_vars(void)
 
     printf("];\n");
 
+    // Structs use curly brackets and contain named variables
     Cfg_Variable *structure = cfg_get_struct(global, "structure");
 
     printf("structure = {\n");
@@ -61,12 +62,14 @@ void print_vars(void)
     int structure_b = cfg_get_int(structure, "b");
     printf("\tb = %d;\n", structure_a);
 
+    // Nested structure
     Cfg_Variable *nested = cfg_get_struct(structure, "nested");
     printf("\tnested = {\n");
 
     double nested_double = cfg_get_double(nested, "double");
     printf("\t\tdouble = %lf;\n", nested_double);
 
+    // Nested array
     Cfg_Variable *nested_ints = cfg_get_array(nested, "ints");
     printf("\t\tints = [");
 
@@ -82,6 +85,7 @@ void print_vars(void)
 
     printf("];\n");
 
+    // Nested list
     Cfg_Variable *nested_list = cfg_get_list(nested, "list");
     printf("\t\tlist = (");
 
@@ -97,11 +101,6 @@ void print_vars(void)
     printf("\t};\n");
 
     printf("};\n");
-}
-
-void print_vars_safe(void)
-{
-
 }
 
 int main(void)
