@@ -1,6 +1,6 @@
 /*
  * cfg.h version 0.1.0
- * public domain - https://github.com/speckitor/cfg.h
+ * git repo - https://github.com/speckitor/cfg.h
  *
  *  MIT License
  *
