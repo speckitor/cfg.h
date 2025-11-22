@@ -3,11 +3,11 @@
 #define CFG_IMPLEMENTATION
 #include "cfg.h"
 
-void print_vars(void)
+void print_vars(Cfg_Config *cfg)
 {
     // Getting global variables context
     // To describe a space that contains varables the word `context` is used
-    Cfg_Variable *global = cfg_global_context();
+    Cfg_Variable *global = cfg_global_context(cfg);
 
     // Getting int, double, bool and string variables
     //
@@ -105,16 +105,22 @@ void print_vars(void)
 
 int main(void)
 {
-    int res = cfg_load_file("./example.cfg");
+    Cfg_Config *cfg = cfg_config_init();
+
+    int res = cfg_load_buffer(cfg, "x = 10;");
     if (res != 0) {
-        printf("%s\n", cfg_get_error_message());
-        cfg_unload();
+        printf("%s\n", cfg_err_message(cfg));
+        cfg_config_deinit(cfg);
         return 1;
     }
 
-    print_vars();
+    Cfg_Variable *global = cfg_global_context(cfg);
 
-    cfg_unload();
+    int x = cfg_get_int(global, "x");
+    printf("%d\n", x);
+//    print_vars(cfg);
+
+    cfg_config_deinit(cfg);
 
     return 0;
 }

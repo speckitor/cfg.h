@@ -1,6 +1,6 @@
 /*
- * cfg.h version 0.1.0
- * git repo - https://github.com/speckitor/cfg.h
+ * cfg.h version 0.2.0
+ * git repo - https://git.speckitor.ru/speckitor/cfg.h
  *
  *  MIT License
  *
@@ -34,6 +34,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#define ERROR_MESSAGE_LEN 512
+
 // Supported variable types
 typedef enum {
     CFG_TYPE_NONE = 0, // If variable does not exist
@@ -61,6 +63,11 @@ typedef enum {
 
 typedef struct Cfg_Variable Cfg_Variable;
 
+typedef struct {
+    char message[ERROR_MESSAGE_LEN];
+    Cfg_Error_Type type;
+} Cfg_Error;
+
 struct Cfg_Variable {
     Cfg_Type type;
     char *name;
@@ -69,20 +76,33 @@ struct Cfg_Variable {
     Cfg_Variable *vars;
     size_t vars_len;
     size_t vars_cap;
+    Cfg_Error err;
 };
+
+typedef struct {
+    Cfg_Variable global;
+    char *buffer;
+    FILE *stream;
+    char *path;
+    Cfg_Error err;
+} Cfg_Config;
 
 // Public API functions declaration
 
-// Loading file, returns 0 on success and 1 on fail
-// If another file is already loaded it will automaticly unload it
-int cfg_load_file(const char *file_path);
-// Unload should be called to free allocated memory
-// Make sure not to use any pointer after unloading (strings, arrays, lists, structs)
-// If you want to save strings after unloading file you can use `strdup`
-void cfg_unload(void);
+// Initialize config variable
+Cfg_Config *cfg_config_init(void);
 
-// Get global context in file
-Cfg_Variable *cfg_global_context(void);
+// Deinitialize config variable
+// Should be called to free memory
+void cfg_config_deinit(Cfg_Config *cfg);
+
+// Loading buffer/stream/file
+Cfg_Error_Type cfg_load_buffer(Cfg_Config *cfg, char *buffer);
+Cfg_Error_Type cfg_load_stream(Cfg_Config *cfg, FILE *stream);
+Cfg_Error_Type cfg_load_file(Cfg_Config *cfg, const char *path);
+
+// Get global context in config
+Cfg_Variable *cfg_global_context(Cfg_Config *config);
 
 // Get length of context
 // Returns amount of inner variables
@@ -98,9 +118,13 @@ char *cfg_get_name(Cfg_Variable *ctx, size_t idx);
 Cfg_Type cfg_get_type(Cfg_Variable *ctx, const char *name);
 Cfg_Type cfg_get_type_elem(Cfg_Variable *ctx, size_t idx);
 
-// Error information
-Cfg_Error_Type cfg_get_error_type(void);
-char *cfg_get_error_message(void);
+// Config error information
+Cfg_Error_Type cfg_err_type(Cfg_Config *cfg);
+char *cfg_err_message(Cfg_Config *cfg);
+
+// Variable error information
+Cfg_Error_Type cfg_context_err_type(Cfg_Variable *ctx);
+char *cfg_context_err_message(Cfg_Variable *ctx);
 
 // Get variables from provided context
 // Context can be global or local (array, list, struct)
@@ -116,13 +140,13 @@ Cfg_Variable *cfg_get_struct(Cfg_Variable *ctx, const char *name);
 // Safe verstions of functions above
 // Return 0 on success, 1 on error
 // To get more information about error see `cfg_get_error_type` and `cfg_get_error_message`
-int cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res);
-int cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res);
-int cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res);
-int cfg_get_string_safe(Cfg_Variable *ctx, const char *name, char **res);
-int cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
-int cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
-int cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
+Cfg_Error_Type cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res);
+Cfg_Error_Type cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res);
+Cfg_Error_Type cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res);
+Cfg_Error_Type cfg_get_string_safe(Cfg_Variable *ctx, const char *name, char **res);
+Cfg_Error_Type cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
+Cfg_Error_Type cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
+Cfg_Error_Type cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
 
 // Get variables by index
 // Return 0/0.0/false/NULL on error
@@ -144,7 +168,6 @@ Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx);
 #define INIT_TOKENS_NUM 64
 #define INIT_STRING_SIZE 64
 #define INIT_STACK_SIZE 64
-#define ERROR_MESSAGE_SIZE 256
 
 typedef enum {
     // Types with string literal values
@@ -180,7 +203,8 @@ typedef struct {
 } Cfg_Stack;
 
 typedef struct {
-    char *file;
+    const char *src;
+    FILE *stream;
     char *str_start;
     char *ch_current;
     Cfg_Token *tokens;
@@ -194,174 +218,110 @@ typedef struct {
     Cfg_Stack stack;
 } Cfg_Lexer;
 
-typedef struct {
-    char *message;
-    Cfg_Error_Type type;
-} Cfg_Error;
-
-typedef struct {
-    Cfg_Variable global;
-    FILE *file;
-    Cfg_Error err;
-} Cfg_Config;
-
-static Cfg_Config cfg;
-static Cfg_Lexer lexer;
-
 // Private functions forward declaration
 
-// Custom malloc and realloc functions
-static void *cfg__malloc(size_t size);
-static void *cfg__realloc(void *prev, size_t size);
-
-// Cfg_Config create and free
-static void cfg__config_create(void);
-static void cfg__config_free(void);
-
 // Cfg_Lexer create and free
-static void cfg__lexer_create(void);
-static void cfg__lexer_free(void);
+static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg);
+static void cfg__lexer_free(Cfg_Lexer *lexer);
 
 // Functions for parsing string from file
 static void cfg__string_add_char(char **str, size_t *cap, char ch);
-static char *cfg__lexer_parse_string(void);
+static char *cfg__lexer_parse_string(Cfg_Lexer *lexer);
 
 // Add token to lexer
-static void cfg__lexer_add_token(Cfg_Token_Type type, char *value);
+static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value);
 
 // Stack functions for brakets and parenthesis evaluation
-static void cfg__stack_add_char(char ch);
-static void cfg__stack_pop_char(void);
-static char cfg__stack_last_char(void);
+static void cfg__stack_add_char(Cfg_Lexer *lexer, char ch);
+static void cfg__stack_pop_char(Cfg_Lexer *lexer);
+static char cfg__stack_last_char(Cfg_Lexer *lexer);
 
 // Cfg_Variable functions to add variable, free context or find variable
 // `cfg__context_find_variable` return -1 on error
-static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *name, char *value);
+static void cfg__context_add_variable(Cfg_Config *cfg, Cfg_Lexer *lexer, Cfg_Variable *ctx, Cfg_Type type, char *name, char *value);
 static void cfg__context_free(Cfg_Variable *ctx);
 static int cfg__context_find_variable(Cfg_Variable *ctx, const char *name);
 
-// File functions
-// `cfg__file_open` and `cfg__file_parse` return 1 on error and 0 on success
-// `cfg__file_get_str` return NULL on error and pointer to allocated string on success
-static int cfg__file_open(const char *file_path);
-static char *cfg__file_get_str(void);
-static void cfg__file_tokenize(void);
-static int cfg__file_parse(void);
+static int cfg__file_open(Cfg_Config *cfg, const char *file_path);
+static char *cfg__file_get_str(Cfg_Config *cfg);
+
+static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer);
+static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream);
+static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer);
 
 // Private functions definition
 
-static void cfg__config_create(void)
+static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
 {
-    cfg.global.vars = cfg__malloc(INIT_VARIABLES_NUM * sizeof(Cfg_Variable));
-    cfg.global.name = NULL;
-    cfg.global.value = NULL;
-    cfg.global.prev = NULL;
-    cfg.global.vars_len = 0;
-    cfg.global.vars_cap = INIT_VARIABLES_NUM;
-    cfg.err.type = CFG_ERROR_NONE;
-    cfg.err.message = cfg__malloc(sizeof(char) * ERROR_MESSAGE_SIZE);
+    Cfg_Lexer *lexer = malloc(sizeof(Cfg_Lexer));
+
+    lexer->tokens = malloc(sizeof(Cfg_Token) * INIT_TOKENS_NUM);
+    lexer->stack.values = malloc(sizeof(char) * INIT_STACK_SIZE);
+
+    lexer->cur_token = 0;
+    lexer->tokens_len = 0;
+    lexer->tokens_cap = INIT_TOKENS_NUM;
+
+    lexer->line = 1;
+    lexer->column = 1;
+
+    lexer->comment_eol = false;
+    lexer->comment = false;
+
+    lexer->stack.cap = INIT_STACK_SIZE;
+    lexer->stack.len = 0;
+
+    return lexer;
 }
 
-static void cfg__config_free(void)
+static void cfg__lexer_free(Cfg_Lexer *lexer)
 {
-    cfg__context_free(&cfg.global);
-    if (cfg.err.message != NULL) free(cfg.err.message);
-    if (cfg.file != NULL) fclose(cfg.file);
-}
-
-static void *cfg__malloc(size_t size)
-{
-    void *data = malloc(size);
-    if (data == NULL) {
-        perror("malloc");
-        exit(1);
-    }
-    return data;
-}
-
-static void *cfg__realloc(void *prev, size_t size)
-{
-    void *data = realloc(prev, size);
-    if (data == NULL) {
-        perror("realloc");
-        exit(1);
-    }
-    return data;
-}
-
-static void cfg__lexer_create(void)
-{
-    char *src = cfg__file_get_str();
-
-    lexer.tokens = cfg__malloc(sizeof(Cfg_Token) * INIT_TOKENS_NUM);
-    lexer.stack.values = cfg__malloc(sizeof(char) * INIT_STACK_SIZE);
-
-    lexer.file = src;
-    lexer.str_start = NULL;
-    lexer.ch_current = src;
-
-    lexer.cur_token = 0;
-    lexer.tokens_len = 0;
-    lexer.tokens_cap = INIT_TOKENS_NUM;
-
-    lexer.line = 1;
-    lexer.column = 1;
-
-    lexer.comment_eol = false;
-    lexer.comment = false;
-
-    lexer.stack.cap = INIT_STACK_SIZE;
-    lexer.stack.len = 0;
-}
-
-static void cfg__lexer_free(void)
-{
-    if (lexer.stack.values != NULL) free(lexer.stack.values);
-    if (lexer.file != NULL) free(lexer.file);
-    for (int i = 0; i < lexer.tokens_len; ++i) {
-        if (lexer.tokens[i].type > CFG_TOKEN_EOF && lexer.tokens[i].value != NULL) {
-            free(lexer.tokens[i].value);
+    if (lexer->stack.values != NULL) free(lexer->stack.values);
+    for (int i = 0; i < lexer->tokens_len; ++i) {
+        if (lexer->tokens[i].type > CFG_TOKEN_EOF && lexer->tokens[i].value != NULL) {
+            free(lexer->tokens[i].value);
         }
     }
-    if (lexer.tokens != NULL) free(lexer.tokens);
+    if (lexer->tokens != NULL) free(lexer->tokens);
+    free(lexer);
 }
 
-static void cfg__lexer_add_token(Cfg_Token_Type type, char *value)
+static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value)
 {
-    if (lexer.tokens_len == lexer.tokens_cap) {
-        lexer.tokens_cap *= 2;
-        lexer.tokens = cfg__realloc(lexer.tokens, sizeof(Cfg_Token) * lexer.tokens_cap);
+    if (lexer->tokens_len == lexer->tokens_cap) {
+        lexer->tokens_cap *= 2;
+        lexer->tokens = realloc(lexer->tokens, sizeof(Cfg_Token) * lexer->tokens_cap);
     }
     
-    size_t idx = lexer.tokens_len++;
-    memset(&lexer.tokens[idx], 0, sizeof(Cfg_Token));
-    lexer.tokens[idx].type = type;
-    lexer.tokens[idx].value = value;
-    lexer.tokens[idx].line = lexer.line;
-    lexer.tokens[idx].column = lexer.column - strlen(value);
+    size_t idx = lexer->tokens_len++;
+    memset(&lexer->tokens[idx], 0, sizeof(Cfg_Token));
+    lexer->tokens[idx].type = type;
+    lexer->tokens[idx].value = value;
+    lexer->tokens[idx].line = lexer->line;
+    lexer->tokens[idx].column = lexer->column - strlen(value);
 }
 
-static void cfg__stack_add_char(char ch)
+static void cfg__stack_add_char(Cfg_Lexer *lexer, char ch)
 {
-    Cfg_Stack *stack = &lexer.stack;
+    Cfg_Stack *stack = &lexer->stack;
     if (stack->len == stack->cap) {
         stack->cap *= 2;
-        stack->values = cfg__realloc(stack->values, sizeof(char) * stack->cap);
+        stack->values = realloc(stack->values, sizeof(char) * stack->cap);
     }
     stack->values[stack->len++] = ch;
 }
 
-static void cfg__stack_pop_char()
+static void cfg__stack_pop_char(Cfg_Lexer *lexer)
 {
-    Cfg_Stack *stack = &lexer.stack;
+    Cfg_Stack *stack = &lexer->stack;
     if (stack->len != 0) {
         stack->values[--stack->len] = '\0';
     }
 }
 
-static char cfg__stack_last_char()
+static char cfg__stack_last_char(Cfg_Lexer *lexer)
 {
-    Cfg_Stack *stack = &lexer.stack;
+    Cfg_Stack *stack = &lexer->stack;
     if (stack->len == 0) return ' ';
     return stack->values[stack->len - 1];
 }
@@ -371,38 +331,38 @@ static void cfg__string_add_char(char **str, size_t *cap, char ch)
     size_t len = strlen(*str);
     if (len + 2 > *cap) {
         *cap *= 2;
-        *str = cfg__realloc(*str, sizeof(char) * (*cap));
+        *str = realloc(*str, sizeof(char) * (*cap));
     }
     (*str)[len] = ch;
     (*str)[len + 1] = '\0';
 }
 
-static char *cfg__lexer_parse_string(void)
+static char *cfg__lexer_parse_string(Cfg_Lexer *lexer)
 {
-    char *str = cfg__malloc(sizeof(char) * INIT_STRING_SIZE);
+    char *str = malloc(sizeof(char) * INIT_STRING_SIZE);
     str[0] = '\0';
     size_t cap = INIT_STRING_SIZE;
 
     char ch;
     bool backslash = false;
-    while (*lexer.ch_current != '\0' && (*lexer.ch_current != '"' || backslash)) {
-        if (*lexer.ch_current == '\\') {
+    while (*lexer->ch_current != '\0' && (*lexer->ch_current != '"' || backslash)) {
+        if (*lexer->ch_current == '\\') {
             if (backslash) {
                 ch = '\\';
                 cfg__string_add_char(&str, &cap, ch);
                 backslash = false;
-                lexer.ch_current++;
-                lexer.column++;
+                lexer->ch_current++;
+                lexer->column++;
                 continue;
             }
             backslash = true;
-            lexer.ch_current++;
-            lexer.column++;
+            lexer->ch_current++;
+            lexer->column++;
             continue;
         }
 
         if (backslash) {
-            switch (*lexer.ch_current) {
+            switch (*lexer->ch_current) {
             case 'n':
                 ch = '\n';
                 break;
@@ -417,34 +377,34 @@ static char *cfg__lexer_parse_string(void)
                 break;
             default:
                 cfg__string_add_char(&str, &cap, '\\');
-                ch = *lexer.ch_current;
+                ch = *lexer->ch_current;
                 break;
             }
             backslash = false;
         } else {
-            ch = *lexer.ch_current;
+            ch = *lexer->ch_current;
         }
         cfg__string_add_char(&str, &cap, ch);
-        lexer.ch_current++;
-        lexer.column++;
+        lexer->ch_current++;
+        lexer->column++;
     }
 
-    if (*lexer.ch_current == '\0') {
+    if (*lexer->ch_current == '\0') {
         free(str);
         return NULL;
     }
 
-    lexer.ch_current++;
-    lexer.column++;
+    lexer->ch_current++;
+    lexer->column++;
 
     return str;
 }
 
-static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *name, char *value)
+static void cfg__context_add_variable(Cfg_Config *cfg, Cfg_Lexer *lexer, Cfg_Variable *ctx, Cfg_Type type, char *name, char *value)
 {
     if (ctx->vars_len == ctx->vars_cap) {
         ctx->vars_cap *= 2;
-        ctx->vars = cfg__realloc(ctx->vars, sizeof(Cfg_Variable) * ctx->vars_cap);
+        ctx->vars = realloc(ctx->vars, sizeof(Cfg_Variable) * ctx->vars_cap);
         for (size_t i = 0; i < ctx->vars_len; ++i) {
             ctx->vars[i].prev = ctx;
         }
@@ -454,11 +414,19 @@ static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *na
     if (name != NULL) {
         for (size_t i = 0; i < ctx->vars_len; ++i) {
             if (strcmp(name, ctx->vars[i].name) == 0) {
-                cfg.err.type = CFG_ERROR_VARIABLE_REDEFINITION;
+                cfg->err.type = CFG_ERROR_VARIABLE_REDEFINITION;
                 if (ctx->name != NULL) {
-                    sprintf(cfg.err.message, "Redefined variable `%s` inside `%s` at line:%lu, column:%lu", name, ctx->name, lexer.tokens[lexer.cur_token - 3].line, lexer.tokens[lexer.cur_token - 3].column);
+                    snprintf(
+                        cfg->err.message, ERROR_MESSAGE_LEN,
+                        "Redefined variable `%s` inside `%s` at line:%lu, column:%lu",
+                        name, ctx->name, lexer->tokens[lexer->cur_token - 3].line, lexer->tokens[lexer->cur_token - 3].column
+                    );
                 } else {
-                    sprintf(cfg.err.message, "Redefined variable `%s` at line:%lu, column:%lu", name, lexer.tokens[lexer.cur_token - 3].line, lexer.tokens[lexer.cur_token - 3].column);
+                    snprintf(
+                        cfg->err.message, ERROR_MESSAGE_LEN,
+                        "Redefined variable `%s` at line:%lu, column:%lu",
+                        name, lexer->tokens[lexer->cur_token - 3].line, lexer->tokens[lexer->cur_token - 3].column
+                    );
                 }
                 return;
             }
@@ -474,7 +442,7 @@ static void cfg__context_add_variable(Cfg_Variable *ctx, Cfg_Type type, char *na
     }
     ctx->vars[ctx->vars_len].prev = ctx;
     if (type & CFG_TYPE_STRUCT || type & CFG_TYPE_ARRAY || type & CFG_TYPE_LIST) {
-        ctx->vars[ctx->vars_len].vars = cfg__malloc(sizeof(Cfg_Variable) * INIT_VARIABLES_NUM);
+        ctx->vars[ctx->vars_len].vars = malloc(sizeof(Cfg_Variable) * INIT_VARIABLES_NUM);
         ctx->vars[ctx->vars_len].vars_cap = INIT_VARIABLES_NUM;
         ctx->vars[ctx->vars_len].vars_len = 0;
     } else {
@@ -507,210 +475,347 @@ static void cfg__context_free(Cfg_Variable *ctx)
     if (ctx->value != NULL) free(ctx->value);
 }
 
-static int cfg__file_open(const char *file_path)
+static int cfg__file_open(Cfg_Config *cfg, const char *file_path)
 {
-    FILE *file = fopen(file_path, "r");
-    if (file == NULL) {
-        cfg.err.type = CFG_ERROR_OPEN_FILE;
-        sprintf(cfg.err.message, "Failed to open file: %s", file_path);
-        return 1;
-    }
-    cfg.file = file;
-    return 0;
 }
 
-static char *cfg__file_get_str(void)
+static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
 {
-    fseek(cfg.file, 0, SEEK_END);
-    long size = ftell(cfg.file);
-    fseek(cfg.file, 0, SEEK_SET);
-    char *file_str = cfg__malloc(sizeof(char) * (size + 1));
-    fread(file_str, sizeof(char), size, cfg.file);
-    file_str[size] = '\0';
-    return file_str;
-}
+    Cfg_Lexer *lexer = cfg__lexer_create(cfg);
+    lexer->src = buffer;
+    lexer->ch_current = buffer;
 
-static void cfg__file_tokenize(void)
-{
-    cfg__lexer_create();
-
-    while (*lexer.ch_current != '\0') {
-        if (*lexer.ch_current == '\n') {
-            lexer.comment_eol = false;
-            lexer.line++;
-            lexer.column = 1;
-            lexer.ch_current++;
+    while (*lexer->ch_current != '\0') {
+        if (*lexer->ch_current == '\n') {
+            lexer->comment_eol = false;
+            lexer->line++;
+            lexer->column = 1;
+            lexer->ch_current++;
             continue;
         }
 
-        if (*lexer.ch_current == '/') {
-            lexer.ch_current++;
-            lexer.column++;
-            if (*lexer.ch_current == '/') {
-                lexer.comment_eol = true;
-                lexer.ch_current++;
-                lexer.column++;
+        if (*lexer->ch_current == '/') {
+            lexer->ch_current++;
+            lexer->column++;
+            if (*lexer->ch_current == '/') {
+                lexer->comment_eol = true;
+                lexer->ch_current++;
+                lexer->column++;
                 continue;
-            } else if (*lexer.ch_current == '*') {
-                lexer.comment = true;
-                lexer.ch_current++;
-                lexer.column++;
+            } else if (*lexer->ch_current == '*') {
+                lexer->comment = true;
+                lexer->ch_current++;
+                lexer->column++;
                 continue;
             } else {
-                cfg.err.type = CFG_ERROR_UNKNOWN_TOKEN;
-                sprintf(cfg.err.message, "Unknown token at line:%lu, column:%lu", lexer.line, lexer.column);
-                cfg__lexer_free();
-                return;
+                cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
+                snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
+                return NULL;
             }
         }
 
-        if (*lexer.ch_current == '*' && lexer.comment) {
-            lexer.ch_current++;
-            lexer.column++;
-            if (*lexer.ch_current == '/') {
-                lexer.comment = false;
-                lexer.ch_current++;
-                lexer.column++;
+        if (*lexer->ch_current == '*' && lexer->comment) {
+            lexer->ch_current++;
+            lexer->column++;
+            if (*lexer->ch_current == '/') {
+                lexer->comment = false;
+                lexer->ch_current++;
+                lexer->column++;
                 continue;
             }
         }
 
-        if (lexer.comment || lexer.comment_eol) {
-            lexer.ch_current++;
-            lexer.column++;
+        if (lexer->comment || lexer->comment_eol) {
+            lexer->ch_current++;
+            lexer->column++;
             continue;
         }
 
-        switch (*lexer.ch_current) {
+        switch (*lexer->ch_current) {
         case ' ':
             break;
         case '=':
-            cfg__lexer_add_token(CFG_TOKEN_EQ, "=");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_EQ, "=");
             break;
         case ';':
-            cfg__lexer_add_token(CFG_TOKEN_SEMICOLON, ";");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_SEMICOLON, ";");
             break;
         case ',':
-            cfg__lexer_add_token(CFG_TOKEN_COMMA, ",");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_COMMA, ",");
             break;
         case '[':
-            cfg__lexer_add_token(CFG_TOKEN_LEFT_BRACKET, "[");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_BRACKET, "[");
             break;
         case ']':
-            cfg__lexer_add_token(CFG_TOKEN_RIGHT_BRACKET, "]");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_BRACKET, "]");
             break;
         case '(':
-            cfg__lexer_add_token(CFG_TOKEN_LEFT_PARENTHESIS, "(");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_PARENTHESIS, "(");
             break;
         case ')':
-            cfg__lexer_add_token(CFG_TOKEN_RIGHT_PARENTHESIS, ")");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_PARENTHESIS, ")");
             break;
         case '{':
-            cfg__lexer_add_token(CFG_TOKEN_LEFT_CURLY_BRACKET, "{");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_CURLY_BRACKET, "{");
             break;
         case '}':
-            cfg__lexer_add_token(CFG_TOKEN_RIGHT_CURLY_BRACKET, "}");
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_CURLY_BRACKET, "}");
             break;
         default:
-            if (isdigit(*lexer.ch_current)) {
-                lexer.str_start = lexer.ch_current;
+            if (isdigit(*lexer->ch_current)) {
+                lexer->str_start = lexer->ch_current;
 
                 size_t dots = 0;
 
-                while (isdigit(*lexer.ch_current) || *lexer.ch_current == '.') {
-                        if (*lexer.ch_current == '.') {
+                while (isdigit(*lexer->ch_current) || *lexer->ch_current == '.') {
+                        if (*lexer->ch_current == '.') {
                             dots++;
                         }
 
-                        lexer.ch_current++;
-                        lexer.column++;
+                        lexer->ch_current++;
+                        lexer->column++;
                 }
 
                 if (dots > 1) {
-                    cfg.err.type = CFG_ERROR_UNKNOWN_TOKEN;
-                    sprintf(cfg.err.message, "Unknown token at line:%lu, column:%lu", lexer.line, lexer.column);
-                    cfg__lexer_free();
-                    return;
+                    cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
+                    snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
+                    return NULL;
                 }
 
-                size_t len = lexer.ch_current - lexer.str_start;
-                char *value = cfg__malloc(sizeof(char) * (len + 1));
+                size_t len = lexer->ch_current - lexer->str_start;
+                char *value = malloc(sizeof(char) * (len + 1));
                 value[len] = '\0';
-                strncpy(value, lexer.str_start, len);
+                strncpy(value, lexer->str_start, len);
 
                 if (dots < 1) {
-                    cfg__lexer_add_token(CFG_TOKEN_INT, value);
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_INT, value);
                 } else {
-                    cfg__lexer_add_token(CFG_TOKEN_DOUBLE, value);
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_DOUBLE, value);
                 }
 
                 continue;
-            } else if (*lexer.ch_current == '"') {
-                lexer.str_start = ++lexer.ch_current;
-                char *value = cfg__lexer_parse_string();
-                cfg__lexer_add_token(CFG_TOKEN_STRING, value);
+            } else if (*lexer->ch_current == '"') {
+                lexer->str_start = ++lexer->ch_current;
+                char *value = cfg__lexer_parse_string(lexer);
+                cfg__lexer_add_token(lexer, CFG_TOKEN_STRING, value);
                 continue;
             } else {
-                lexer.str_start = lexer.ch_current;
+                lexer->str_start = lexer->ch_current;
 
-                while (*lexer.ch_current != ' ' &&
-                       *lexer.ch_current != '\n' &&
-                       *lexer.ch_current != '=' &&
-                       *lexer.ch_current != ';' &&
-                       *lexer.ch_current != ',' &&
-                       *lexer.ch_current != '[' &&
-                       *lexer.ch_current != ']' &&
-                       *lexer.ch_current != '(' &&
-                       *lexer.ch_current != ')' &&
-                       *lexer.ch_current != '{' &&
-                       *lexer.ch_current != '}') {
-                    lexer.ch_current++;
-                    lexer.column++;
+                while (*lexer->ch_current != ' ' &&
+                       *lexer->ch_current != '\0' &&
+                       *lexer->ch_current != '\n' &&
+                       *lexer->ch_current != '=' &&
+                       *lexer->ch_current != ';' &&
+                       *lexer->ch_current != ',' &&
+                       *lexer->ch_current != '[' &&
+                       *lexer->ch_current != ']' &&
+                       *lexer->ch_current != '(' &&
+                       *lexer->ch_current != ')' &&
+                       *lexer->ch_current != '{' &&
+                       *lexer->ch_current != '}') {
+                    lexer->ch_current++;
+                    lexer->column++;
                 }
 
-                if (lexer.str_start == lexer.ch_current) {
-                    lexer.ch_current++;
-                    lexer.column++;
+                if (lexer->str_start == lexer->ch_current) {
+                    lexer->ch_current++;
+                    lexer->column++;
                     continue;
                 }
 
-                size_t len = lexer.ch_current - lexer.str_start;
-                char *value = cfg__malloc(sizeof(char) * (len + 1));
+                size_t len = lexer->ch_current - lexer->str_start;
+                char *value = malloc(sizeof(char) * (len + 1));
                 value[len] = '\0';
-                strncpy(value, lexer.str_start, len);
+                strncpy(value, lexer->str_start, len);
 
                 if (strcmp(value, "true") == 0 ||
                     strcmp(value, "false") == 0) {
-                    cfg__lexer_add_token(CFG_TOKEN_BOOL, value);
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_BOOL, value);
                     continue;
                 } else {
-                    cfg__lexer_add_token(CFG_TOKEN_IDENTIFIER, value);
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_IDENTIFIER, value);
                 }
             }
         }
-        lexer.ch_current++;
-        lexer.column++;
+        lexer->ch_current++;
+        lexer->column++;
     }
 
-    cfg__lexer_add_token(CFG_TOKEN_EOF, "\0");
+    cfg__lexer_add_token(lexer, CFG_TOKEN_EOF, "\0");
+    return lexer;
 }
 
-static int cfg__file_parse(void)
+static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
 {
-    cfg__file_tokenize();
+    Cfg_Lexer *lexer = cfg__lexer_create(cfg);
+    lexer->stream = stream;
+    char c;
 
-    if (cfg.err.type != CFG_ERROR_NONE) return 1;
+    while ((c = fgetc(stream)) != EOF) {
+        if (c == '\n') {
+            lexer->comment_eol = false;
+            lexer->line++;
+            lexer->column = 1;
+            continue;
+        }
 
+        if (c == '/') {
+            lexer->column++;
+            if (c == '/') {
+                lexer->comment_eol = true;
+                lexer->column++;
+                continue;
+            } else if (c == '*') {
+                lexer->comment = true;
+                lexer->column++;
+                continue;
+            } else {
+                cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
+                snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
+                return NULL;
+            }
+        }
+
+        if (c == '*' && lexer->comment) {
+            lexer->column++;
+            if ((c = fgetc(stream)) == '/') {
+                lexer->comment = false;
+                lexer->column++;
+                continue;
+            }
+        }
+
+        if (lexer->comment || lexer->comment_eol) {
+            lexer->column++;
+            continue;
+        }
+
+        switch (c) {
+        case ' ':
+            break;
+        case '=':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_EQ, "=");
+            break;
+        case ';':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_SEMICOLON, ";");
+            break;
+        case ',':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_COMMA, ",");
+            break;
+        case '[':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_BRACKET, "[");
+            break;
+        case ']':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_BRACKET, "]");
+            break;
+        case '(':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_PARENTHESIS, "(");
+            break;
+        case ')':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_PARENTHESIS, ")");
+            break;
+        case '{':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_LEFT_CURLY_BRACKET, "{");
+            break;
+        case '}':
+            cfg__lexer_add_token(lexer, CFG_TOKEN_RIGHT_CURLY_BRACKET, "}");
+            break;
+        default:
+            if (isdigit(c)) {
+                lexer->str_start = lexer->ch_current;
+                size_t length = 0;
+
+                size_t dots = 0;
+
+                while (isdigit(*lexer->ch_current) || *lexer->ch_current == '.') {
+                        if (*lexer->ch_current == '.') {
+                            dots++;
+                        }
+
+                        lexer->ch_current++;
+                        lexer->column++;
+                }
+
+                if (dots > 1) {
+                    cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
+                    snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
+                    return NULL;
+                }
+
+                size_t len = lexer->ch_current - lexer->str_start;
+                char *value = malloc(sizeof(char) * (len + 1));
+                value[len] = '\0';
+                strncpy(value, lexer->str_start, len);
+
+                if (dots < 1) {
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_INT, value);
+                } else {
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_DOUBLE, value);
+                }
+
+                continue;
+            } else if (*lexer->ch_current == '"') {
+                lexer->str_start = ++lexer->ch_current;
+                char *value = cfg__lexer_parse_string(lexer);
+                cfg__lexer_add_token(lexer, CFG_TOKEN_STRING, value);
+                continue;
+            } else {
+                lexer->str_start = lexer->ch_current;
+
+                while (*lexer->ch_current != ' ' &&
+                       *lexer->ch_current != '\n' &&
+                       *lexer->ch_current != '=' &&
+                       *lexer->ch_current != ';' &&
+                       *lexer->ch_current != ',' &&
+                       *lexer->ch_current != '[' &&
+                       *lexer->ch_current != ']' &&
+                       *lexer->ch_current != '(' &&
+                       *lexer->ch_current != ')' &&
+                       *lexer->ch_current != '{' &&
+                       *lexer->ch_current != '}') {
+                    lexer->ch_current++;
+                    lexer->column++;
+                }
+
+                if (lexer->str_start == lexer->ch_current) {
+                    lexer->ch_current++;
+                    lexer->column++;
+                    continue;
+                }
+
+                size_t len = lexer->ch_current - lexer->str_start;
+                char *value = malloc(sizeof(char) * (len + 1));
+                value[len] = '\0';
+                strncpy(value, lexer->str_start, len);
+
+                if (strcmp(value, "true") == 0 ||
+                    strcmp(value, "false") == 0) {
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_BOOL, value);
+                    continue;
+                } else {
+                    cfg__lexer_add_token(lexer, CFG_TOKEN_IDENTIFIER, value);
+                }
+            }
+        }
+        lexer->column++;
+    }
+
+    cfg__lexer_add_token(lexer, CFG_TOKEN_EOF, "\0");
+}
+
+static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
+{
     int prev_token = 0;
     int expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
     int type = 0;
     char *name = NULL;
     char *value = NULL;
-    Cfg_Token *tokens = lexer.tokens;
-    Cfg_Stack *stack = &lexer.stack;
-    Cfg_Variable *ctx = &cfg.global;
-    for (size_t i = lexer.cur_token; i < lexer.tokens_len; ++i) {
-        lexer.cur_token = i;
+    Cfg_Token *tokens = lexer->tokens;
+    Cfg_Stack *stack = &lexer->stack;
+    Cfg_Variable *ctx = &cfg->global;
+    for (size_t i = lexer->cur_token; i < lexer->tokens_len; ++i) {
+        lexer->cur_token = i;
         if (tokens[i].type & expected_token) {
             switch (tokens[i].type) {
             case CFG_TOKEN_EQ:
@@ -724,30 +829,27 @@ static int cfg__file_parse(void)
                 break;
             case CFG_TOKEN_SEMICOLON:
                 if (name != NULL && value != NULL) {
-                    cfg__context_add_variable(ctx, type, name, value);
-                    if (cfg.err.type != CFG_ERROR_NONE) {
-                        cfg__lexer_free();
+                    cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                    if (cfg->err.type != CFG_ERROR_NONE) {
                         return 1;
                     }
                 }
                 name = NULL;
                 value = NULL;
                 expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
-                if (cfg__stack_last_char() == '{') {
+                if (cfg__stack_last_char(lexer) == '{') {
                     expected_token |= CFG_TOKEN_RIGHT_CURLY_BRACKET;
                 }
                 break;
             case CFG_TOKEN_COMMA:
-                if (cfg__stack_last_char() == '[' && ctx->vars_len > 0 && type != ctx->vars[0].type) {
-                    cfg.err.type = CFG_ERROR_UNEXPECTED_TOKEN;
-                    sprintf(cfg.err.message, "Wrong array member type line:%lu, column:%lu", tokens[i - 1].line, tokens[i - 1].column);
-                    cfg__lexer_free();
+                if (cfg__stack_last_char(lexer) == '[' && ctx->vars_len > 0 && type != ctx->vars[0].type) {
+                    cfg->err.type = CFG_ERROR_UNEXPECTED_TOKEN;
+                    snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Wrong array member type line:%lu, column:%lu", tokens[i - 1].line, tokens[i - 1].column);
                     return 1;
                 };
 
-                cfg__context_add_variable(ctx, type, name, value);
-                if (cfg.err.type != CFG_ERROR_NONE) {
-                    cfg__lexer_free();
+                cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                if (cfg->err.type != CFG_ERROR_NONE) {
                     return 1;
                 }
 
@@ -760,7 +862,7 @@ static int cfg__file_parse(void)
                                  CFG_TOKEN_DOUBLE |
                                  CFG_TOKEN_BOOL |
                                  CFG_TOKEN_STRING;
-                switch (cfg__stack_last_char()) {
+                switch (cfg__stack_last_char(lexer)) {
                 case '[':
                     expected_token |= CFG_TOKEN_RIGHT_BRACKET;
                     break;
@@ -772,12 +874,11 @@ static int cfg__file_parse(void)
                 }
                 break;
             case CFG_TOKEN_LEFT_BRACKET:
-                cfg__stack_add_char('[');
+                cfg__stack_add_char(lexer, '[');
                 type = CFG_TYPE_ARRAY;
                 value = NULL;
-                cfg__context_add_variable(ctx, type, name, value);
-                if (cfg.err.type != CFG_ERROR_NONE) {
-                    cfg__lexer_free();
+                cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                if (cfg->err.type != CFG_ERROR_NONE) {
                     return 1;
                 }
                 name = NULL;
@@ -794,21 +895,19 @@ static int cfg__file_parse(void)
             case CFG_TOKEN_RIGHT_BRACKET:
                 if (value != NULL) {
                     if (type != ctx->vars[0].type) {
-                        cfg.err.type = CFG_ERROR_UNEXPECTED_TOKEN;
-                        sprintf(cfg.err.message, "Wrong array member type at line:%lu, column%lu", tokens[i - 1].line, tokens[i - 1].column);
-                        cfg__lexer_free();
+                        cfg->err.type = CFG_ERROR_UNEXPECTED_TOKEN;
+                        snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Wrong array member type at line:%lu, column%lu", tokens[i - 1].line, tokens[i - 1].column);
                         return 1;
                     };
-                    cfg__context_add_variable(ctx, type, name, value);
-                    if (cfg.err.type != CFG_ERROR_NONE) {
-                        cfg__lexer_free();
+                    cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                    if (cfg->err.type != CFG_ERROR_NONE) {
                         return 1;
                     }
                     value = NULL;
                 }
-                cfg__stack_pop_char();
+                cfg__stack_pop_char(lexer);
                 ctx = ctx->prev;
-                switch (cfg__stack_last_char()) {
+                switch (cfg__stack_last_char(lexer)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
@@ -821,12 +920,11 @@ static int cfg__file_parse(void)
                 }
                 break;
             case CFG_TOKEN_LEFT_PARENTHESIS:
-                cfg__stack_add_char('(');
+                cfg__stack_add_char(lexer, '(');
                 type = CFG_TYPE_LIST;
                 value = NULL;
-                cfg__context_add_variable(ctx, type, name, value);
-                if (cfg.err.type != CFG_ERROR_NONE) {
-                    cfg__lexer_free();
+                cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                if (cfg->err.type != CFG_ERROR_NONE) {
                     return 1;
                 }
                 name = NULL;
@@ -842,16 +940,15 @@ static int cfg__file_parse(void)
                 break;
             case CFG_TOKEN_RIGHT_PARENTHESIS:
                 if (value != NULL) {
-                    cfg__context_add_variable(ctx, type, name, value);
-                    if (cfg.err.type != CFG_ERROR_NONE) {
-                        cfg__lexer_free();
+                    cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                    if (cfg->err.type != CFG_ERROR_NONE) {
                         return 1;
                     }
                     value = NULL;
                 }
-                cfg__stack_pop_char();
+                cfg__stack_pop_char(lexer);
                 ctx = ctx->prev;
-                switch (cfg__stack_last_char()) {
+                switch (cfg__stack_last_char(lexer)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
@@ -864,12 +961,11 @@ static int cfg__file_parse(void)
                 }
                 break;
             case CFG_TOKEN_LEFT_CURLY_BRACKET:
-                cfg__stack_add_char('{');
+                cfg__stack_add_char(lexer, '{');
                 type = CFG_TYPE_STRUCT;
                 value = NULL;
-                cfg__context_add_variable(ctx, type, name, value);
-                if (cfg.err.type != CFG_ERROR_NONE) {
-                    cfg__lexer_free();
+                cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                if (cfg->err.type != CFG_ERROR_NONE) {
                     return 1;
                 }
                 name = NULL;
@@ -877,12 +973,12 @@ static int cfg__file_parse(void)
                 expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_RIGHT_CURLY_BRACKET;
                 break;
             case CFG_TOKEN_RIGHT_CURLY_BRACKET:
-                cfg__stack_pop_char();
+                cfg__stack_pop_char(lexer);
                 ctx = ctx->prev;
                 type = 0;
                 name = NULL;
                 value = NULL;
-                switch (cfg__stack_last_char()) {
+                switch (cfg__stack_last_char(lexer)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
@@ -901,7 +997,7 @@ static int cfg__file_parse(void)
             case CFG_TOKEN_INT:
                 type = CFG_TYPE_INT;
                 value = tokens[i].value;
-                switch (cfg__stack_last_char()) {
+                switch (cfg__stack_last_char(lexer)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
@@ -916,7 +1012,7 @@ static int cfg__file_parse(void)
             case CFG_TOKEN_DOUBLE:
                 type = CFG_TYPE_DOUBLE;
                 value = tokens[i].value;
-                switch (cfg__stack_last_char()) {
+                switch (cfg__stack_last_char(lexer)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
@@ -931,7 +1027,7 @@ static int cfg__file_parse(void)
             case CFG_TOKEN_BOOL:
                 type = CFG_TYPE_BOOL;
                 value = tokens[i].value;
-                switch (cfg__stack_last_char()) {
+                switch (cfg__stack_last_char(lexer)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
@@ -947,14 +1043,14 @@ static int cfg__file_parse(void)
                 type = CFG_TYPE_STRING;
                 if (prev_token & CFG_TOKEN_STRING) {
                     size_t new_size = sizeof(char) * (strlen(value) + strlen(tokens[i].value) + 1);
-                    char *tmp = cfg__malloc(new_size);
+                    char *tmp = malloc(new_size);
                     strcpy(tmp, value);
                     strcat(tmp, tokens[i].value);
                     value = tmp;
                 } else {
                     value = tokens[i].value;
                 }
-                switch (cfg__stack_last_char()) {
+                switch (cfg__stack_last_char(lexer)) {
                 case '[':
                     expected_token = CFG_TOKEN_COMMA | CFG_TOKEN_RIGHT_BRACKET;
                     break;
@@ -971,15 +1067,12 @@ static int cfg__file_parse(void)
                 break;
             }
         } else {
-            cfg.err.type = CFG_ERROR_UNEXPECTED_TOKEN;
-            sprintf(cfg.err.message, "Unexpected token at line:%lu, column:%lu", tokens[i].line, tokens[i].column);
-            cfg__lexer_free();
+            cfg->err.type = CFG_ERROR_UNEXPECTED_TOKEN;
+            snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unexpected token at line:%lu, column:%lu", tokens[i].line, tokens[i].column);
             return 1;
         }
         prev_token = tokens[i].type;
     }
-
-    cfg__lexer_free();
 
     return 0;
 }
@@ -987,28 +1080,58 @@ static int cfg__file_parse(void)
 
 // Public API function definitions
 
-int cfg_load_file(const char *file_path)
+Cfg_Config *cfg_config_init(void)
 {
-    if (cfg.global.vars != NULL) {
-        cfg__config_free();
-    }
-    cfg__config_create();
+    Cfg_Config *cfg = malloc(sizeof(Cfg_Config));
+    cfg->global.vars = malloc(INIT_VARIABLES_NUM * sizeof(Cfg_Variable));
+    cfg->global.name = NULL;
+    cfg->global.value = NULL;
+    cfg->global.prev = NULL;
+    cfg->global.vars_len = 0;
+    cfg->global.vars_cap = INIT_VARIABLES_NUM;
+    cfg->err.type = CFG_ERROR_NONE;
+    cfg->err.message[0] = '\0';
+    cfg->buffer = NULL;
+    cfg->stream = NULL;
+    cfg->path = NULL;
+    return cfg;
+}
 
-    if ((cfg__file_open(file_path)) != 0 ||
-        (cfg__file_parse() != 0)) {
-        return 1;
-    }
+void cfg_config_deinit(Cfg_Config *cfg)
+{
+    if (cfg == NULL) return;
+    cfg__context_free(&cfg->global);
+    free(cfg);
+}
+
+Cfg_Error_Type cfg_load_buffer(Cfg_Config *cfg, char *buffer)
+{
+    Cfg_Lexer *lexer = cfg__buffer_tokenize(cfg, buffer);
+    if (lexer == NULL) return cfg->err.type;
+    int res = cfg__parse_tokens(cfg, lexer);
+    cfg__lexer_free(lexer);
+    if (res != 0) return cfg->err.type;
+    return CFG_ERROR_NONE;
+}
+
+Cfg_Error_Type cfg_load_stream(Cfg_Config *cfg, FILE *stream)
+{
+    Cfg_Lexer *lexer = cfg__stream_tokenize(cfg, stream);
+    if (lexer == NULL) return cfg->err.type;
+    int res = cfg__parse_tokens(cfg, lexer);
+    cfg__lexer_free(lexer);
+    if (res != 0) return cfg->err.type;
+    return CFG_ERROR_NONE;
+}
+
+Cfg_Error_Type cfg_load_file(Cfg_Config *cfg, const char *path)
+{
     return 0;
 }
 
-void cfg_unload(void)
+Cfg_Variable *cfg_global_context(Cfg_Config *cfg)
 {
-    cfg__config_free();
-}
-
-Cfg_Variable *cfg_global_context(void)
-{
-    return &cfg.global;
+    return &cfg->global;
 }
 
 int cfg_get_int(Cfg_Variable *ctx, const char *name)
@@ -1104,102 +1227,102 @@ Cfg_Variable *cfg_get_struct(Cfg_Variable *ctx, const char *name)
     return &ctx->vars[i];
 }
 
-int cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res)
+Cfg_Error_Type cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
     if (i == -1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        ctx->err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` not found", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (ctx->vars[i].type != CFG_TYPE_INT) {
-        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        ctx->err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` in `%s` is not int", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` in `%s` is not int", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` is not int", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` is not int", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (sscanf(ctx->vars[i].value, "%d", res) != 1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_PARSE;
+        ctx->err.type = CFG_ERROR_VARIABLE_PARSE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Failed to parse variable `%s` in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Failed to parse variable `%s` in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Failed to parse variable `%s`", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Failed to parse variable `%s`", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
-    return 0;
+    return CFG_ERROR_NONE;
 }
 
-int cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res)
+Cfg_Error_Type cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
     if (i == -1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        ctx->err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` not found", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (ctx->vars[i].type != CFG_TYPE_DOUBLE) {
-        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        ctx->err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` in `%s` is not double", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` in `%s` is not double", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` is not double", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` is not double", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (sscanf(ctx->vars[i].value, "%lf", res) != 1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_PARSE;
+        ctx->err.type = CFG_ERROR_VARIABLE_PARSE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Failed to parse variable `%s` in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Failed to parse variable `%s` in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Failed to parse variable `%s`", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Failed to parse variable `%s`", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
-    return 0;
+    return CFG_ERROR_NONE;
 }
 
-int cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res)
+Cfg_Error_Type cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
     if (i == -1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        ctx->err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` not found", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (ctx->vars[i].type != CFG_TYPE_BOOL) {
-        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        ctx->err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` in `%s` is not bool", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` in `%s` is not bool", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` is not bool", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` is not bool", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (strcmp(ctx->vars[i].value, "true") == 0) {
@@ -1208,119 +1331,119 @@ int cfg_get_bool_safe(Cfg_Variable *ctx, const char *name, bool *res)
         *res = false;
     }
 
-    return 0;
+    return CFG_ERROR_NONE;
 }
 
-int cfg_get_string_safe(Cfg_Variable *ctx, const char *name, char **res)
+Cfg_Error_Type cfg_get_string_safe(Cfg_Variable *ctx, const char *name, char **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
     if (i == -1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        ctx->err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` not found", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (ctx->vars[i].type != CFG_TYPE_STRING) {
-        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        ctx->err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` in `%s` is not string", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` in `%s` is not string", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` is not string", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` is not string", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     *res = ctx->vars[i].value;
-    return 0;
+    return CFG_ERROR_NONE;
 }
 
-int cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
+Cfg_Error_Type cfg_get_array_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
     if (i == -1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        ctx->err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` not found", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (ctx->vars[i].type != CFG_TYPE_ARRAY) {
-        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        ctx->err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` in `%s` is not array", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` in `%s` is not array", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` is not array", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` is not array", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     *res = &ctx->vars[i];
-    return 0;
+    return CFG_ERROR_NONE;
 }
 
-int cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
+Cfg_Error_Type cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
     if (i == -1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        ctx->err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` not found", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (ctx->vars[i].type != CFG_TYPE_LIST) {
-        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        ctx->err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` in `%s` is not list", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` in `%s` is not list", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` is not list", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` is not list", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     *res = &ctx->vars[i];
-    return 0;
+    return CFG_ERROR_NONE;
 }
 
-int cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
+Cfg_Error_Type cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res)
 {
     int i = cfg__context_find_variable(ctx, name);
 
     if (i == -1) {
-        cfg.err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
+        ctx->err.type = CFG_ERROR_VARIABLE_NOT_FOUND;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` not found in `%s`", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found in `%s`", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` not found", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` not found", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     if (ctx->vars[i].type != CFG_TYPE_STRUCT) {
-        cfg.err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
+        ctx->err.type = CFG_ERROR_VARIABLE_WRONG_TYPE;
         if (ctx->name != NULL) {
-            sprintf(cfg.err.message, "Variable `%s` in `%s` is not struct", name, ctx->name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` in `%s` is not struct", name, ctx->name);
         } else {
-            sprintf(cfg.err.message, "Variable `%s` is not struct", name);
+            snprintf(ctx->err.message, ERROR_MESSAGE_LEN, "Variable `%s` is not struct", name);
         }
-        return 1;
+        return ctx->err.type;
     }
 
     *res = &ctx->vars[i];
-    return 0;
+    return CFG_ERROR_NONE;
 }
 
 size_t cfg_get_context_len(Cfg_Variable *ctx)
@@ -1416,16 +1539,28 @@ Cfg_Type cfg_get_type_elem(Cfg_Variable *ctx, size_t idx)
     return ctx->vars[idx].type;
 }
 
-Cfg_Error_Type cfg_get_error_type(void)
+Cfg_Error_Type cfg_err_type(Cfg_Config *cfg)
 {
-    return cfg.err.type;
+    return cfg->err.type;
 }
 
-char *cfg_get_error_message(void)
+char *cfg_err_message(Cfg_Config *cfg)
 {
-    if (cfg.err.type == CFG_ERROR_NONE) return NULL;
+    if (cfg->err.type == CFG_ERROR_NONE) return NULL;
 
-    return cfg.err.message;
+    return cfg->err.message;
+}
+
+Cfg_Error_Type cfg_context_err_type(Cfg_Variable *ctx)
+{
+    return ctx->err.type;
+}
+
+char *cfg_context_err_message(Cfg_Variable *ctx)
+{
+    if (ctx->err.type == CFG_ERROR_NONE) return NULL;
+
+    return ctx->err.message;
 }
 
 #endif // CFG_IMPLEMENTATION
