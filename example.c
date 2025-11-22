@@ -107,18 +107,14 @@ int main(void)
 {
     Cfg_Config *cfg = cfg_config_init();
 
-    int res = cfg_load_buffer(cfg, "x = 10;");
+    int res = cfg_load_file(cfg, "./example.cfg");
     if (res != 0) {
         printf("%s\n", cfg_err_message(cfg));
         cfg_config_deinit(cfg);
         return 1;
     }
 
-    Cfg_Variable *global = cfg_global_context(cfg);
-
-    int x = cfg_get_int(global, "x");
-    printf("%d\n", x);
-//    print_vars(cfg);
+    print_vars(cfg);
 
     cfg_config_deinit(cfg);
 

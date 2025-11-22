@@ -1,6 +1,6 @@
 /*
- * cfg.h version 0.2.0
- * git repo - https://git.speckitor.ru/speckitor/cfg.h
+ *  cfg.h version 0.2.0
+ *  git repo - https://git.speckitor.ru/speckitor/cfg.h
  *
  *  MIT License
  *
@@ -203,8 +203,6 @@ typedef struct {
 } Cfg_Stack;
 
 typedef struct {
-    const char *src;
-    FILE *stream;
     char *str_start;
     char *ch_current;
     Cfg_Token *tokens;
@@ -224,9 +222,10 @@ typedef struct {
 static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg);
 static void cfg__lexer_free(Cfg_Lexer *lexer);
 
-// Functions for parsing string from file
+// Functions for parsing string
 static void cfg__string_add_char(char **str, size_t *cap, char ch);
-static char *cfg__lexer_parse_string(Cfg_Lexer *lexer);
+static char *cfg__lexer_parse_string_buffer(Cfg_Lexer *lexer);
+static char *cfg__lexer_parse_string_stream(Cfg_Lexer *lexer, FILE *stream);
 
 // Add token to lexer
 static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *value);
@@ -241,9 +240,6 @@ static char cfg__stack_last_char(Cfg_Lexer *lexer);
 static void cfg__context_add_variable(Cfg_Config *cfg, Cfg_Lexer *lexer, Cfg_Variable *ctx, Cfg_Type type, char *name, char *value);
 static void cfg__context_free(Cfg_Variable *ctx);
 static int cfg__context_find_variable(Cfg_Variable *ctx, const char *name);
-
-static int cfg__file_open(Cfg_Config *cfg, const char *file_path);
-static char *cfg__file_get_str(Cfg_Config *cfg);
 
 static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer);
 static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream);
@@ -298,7 +294,7 @@ static void cfg__lexer_add_token(Cfg_Lexer *lexer, Cfg_Token_Type type, char *va
     lexer->tokens[idx].type = type;
     lexer->tokens[idx].value = value;
     lexer->tokens[idx].line = lexer->line;
-    lexer->tokens[idx].column = lexer->column - strlen(value);
+    lexer->tokens[idx].column = lexer->column;
 }
 
 static void cfg__stack_add_char(Cfg_Lexer *lexer, char ch)
@@ -337,7 +333,7 @@ static void cfg__string_add_char(char **str, size_t *cap, char ch)
     (*str)[len + 1] = '\0';
 }
 
-static char *cfg__lexer_parse_string(Cfg_Lexer *lexer)
+static char *cfg__lexer_parse_string_buffer(Cfg_Lexer *lexer)
 {
     char *str = malloc(sizeof(char) * INIT_STRING_SIZE);
     str[0] = '\0';
@@ -390,12 +386,73 @@ static char *cfg__lexer_parse_string(Cfg_Lexer *lexer)
     }
 
     if (*lexer->ch_current == '\0') {
-        free(str);
-        return NULL;
+        str[0] = '\0';
+        return str;
     }
 
     lexer->ch_current++;
     lexer->column++;
+
+    return str;
+}
+
+static char *cfg__lexer_parse_string_stream(Cfg_Lexer *lexer, FILE *stream)
+{
+    size_t cap = INIT_STRING_SIZE;
+    char *str = malloc(sizeof(char) * cap);
+    str[0] = '\0';
+
+    char c = fgetc(stream);
+    char ch;
+    bool backslash = false;
+
+    while (c != '\0' && (c != '"' || backslash)) {
+        if (c == '\\') {
+            if (backslash) {
+                cfg__string_add_char(&str, &cap, c);
+                backslash = false;
+                c = fgetc(stream);
+                lexer->column++;
+                continue;
+            }
+            backslash = true;
+            c = fgetc(stream);
+            lexer->column++;
+            continue;
+        }
+
+        if (backslash) {
+            switch (c) {
+            case 'n':
+                ch = '\n';
+                break;
+            case 't':
+                ch = '\t';
+                break;
+            case '\"':
+                ch = '\"';
+                break;
+            case '\'':
+                ch = '\'';
+                break;
+            default:
+                cfg__string_add_char(&str, &cap, '\\');
+                ch = c;
+                break;
+            }
+            backslash = false;
+        } else {
+            ch = c;
+        }
+        cfg__string_add_char(&str, &cap, ch);
+        c = fgetc(stream);
+        lexer->column++;
+    }
+
+    if (c == '\0') {
+        str[0] = '\0';
+        return str;
+    }
 
     return str;
 }
@@ -475,14 +532,9 @@ static void cfg__context_free(Cfg_Variable *ctx)
     if (ctx->value != NULL) free(ctx->value);
 }
 
-static int cfg__file_open(Cfg_Config *cfg, const char *file_path)
-{
-}
-
 static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
 {
     Cfg_Lexer *lexer = cfg__lexer_create(cfg);
-    lexer->src = buffer;
     lexer->ch_current = buffer;
 
     while (*lexer->ch_current != '\0') {
@@ -596,7 +648,7 @@ static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
                 continue;
             } else if (*lexer->ch_current == '"') {
                 lexer->str_start = ++lexer->ch_current;
-                char *value = cfg__lexer_parse_string(lexer);
+                char *value = cfg__lexer_parse_string_buffer(lexer);
                 cfg__lexer_add_token(lexer, CFG_TOKEN_STRING, value);
                 continue;
             } else {
@@ -649,7 +701,6 @@ static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
 static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
 {
     Cfg_Lexer *lexer = cfg__lexer_create(cfg);
-    lexer->stream = stream;
     char c;
 
     while ((c = fgetc(stream)) != EOF) {
@@ -723,85 +774,112 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
             break;
         default:
             if (isdigit(c)) {
-                lexer->str_start = lexer->ch_current;
-                size_t length = 0;
-
+                size_t len = 0;
+                size_t cap = INIT_STRING_SIZE;
+                char *value = malloc(sizeof(char) * cap);
                 size_t dots = 0;
 
-                while (isdigit(*lexer->ch_current) || *lexer->ch_current == '.') {
-                        if (*lexer->ch_current == '.') {
-                            dots++;
-                        }
+                while (isdigit(c) || c == '.') {
+                    if (c == '.') {
+                        dots++;
+                    }
 
-                        lexer->ch_current++;
-                        lexer->column++;
+                    if (len == cap) {
+                        cap *= 2;
+                        value = realloc(value, sizeof(char) * cap);
+                    }
+                    value[len++] = c;
+
+                    c = fgetc(stream);
+                    lexer->column++;
+                }
+
+                if (c == '\0') {
+                    free(value);
+                    cfg->err.type = CFG_ERROR_UNEXPECTED_TOKEN;
+                    snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unexpected token at line:%lu, column:%lu", lexer->line, lexer->column);
+                    return NULL;
                 }
 
                 if (dots > 1) {
+                    free(value);
                     cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
                     snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
                     return NULL;
                 }
 
-                size_t len = lexer->ch_current - lexer->str_start;
-                char *value = malloc(sizeof(char) * (len + 1));
+                if (len == cap) {
+                    cap++;
+                    value = realloc(value, sizeof(char) * cap);
+                }
                 value[len] = '\0';
-                strncpy(value, lexer->str_start, len);
 
                 if (dots < 1) {
                     cfg__lexer_add_token(lexer, CFG_TOKEN_INT, value);
                 } else {
                     cfg__lexer_add_token(lexer, CFG_TOKEN_DOUBLE, value);
                 }
-
+                ungetc(c, stream);
                 continue;
-            } else if (*lexer->ch_current == '"') {
-                lexer->str_start = ++lexer->ch_current;
-                char *value = cfg__lexer_parse_string(lexer);
+            } else if (c == '"') {
+                char *value = cfg__lexer_parse_string_stream(lexer, stream);
                 cfg__lexer_add_token(lexer, CFG_TOKEN_STRING, value);
+                lexer->column++;
                 continue;
             } else {
-                lexer->str_start = lexer->ch_current;
+                size_t len = 0;
+                size_t cap = INIT_STRING_SIZE;
+                char *value = malloc(sizeof(char) * cap);
 
-                while (*lexer->ch_current != ' ' &&
-                       *lexer->ch_current != '\n' &&
-                       *lexer->ch_current != '=' &&
-                       *lexer->ch_current != ';' &&
-                       *lexer->ch_current != ',' &&
-                       *lexer->ch_current != '[' &&
-                       *lexer->ch_current != ']' &&
-                       *lexer->ch_current != '(' &&
-                       *lexer->ch_current != ')' &&
-                       *lexer->ch_current != '{' &&
-                       *lexer->ch_current != '}') {
-                    lexer->ch_current++;
+                while (c != ' ' &&
+                       c != EOF &&
+                       c != '\n' &&
+                       c != '=' &&
+                       c != ';' &&
+                       c != ',' &&
+                       c != '[' &&
+                       c != ']' &&
+                       c != '(' &&
+                       c != ')' &&
+                       c != '{' &&
+                       c != '}') {
+                    if (len == cap) {
+                        cap *= 2;
+                        value = realloc(value, sizeof(char) * cap);
+                    }
+                    value[len++] = c;
+
+                    c = fgetc(stream);
                     lexer->column++;
                 }
 
-                if (lexer->str_start == lexer->ch_current) {
-                    lexer->ch_current++;
+                if (len == 0) {
                     lexer->column++;
                     continue;
                 }
 
-                size_t len = lexer->ch_current - lexer->str_start;
-                char *value = malloc(sizeof(char) * (len + 1));
+                if (len == cap) {
+                    cap++;
+                    value = realloc(value, sizeof(char) * cap);
+                }
                 value[len] = '\0';
-                strncpy(value, lexer->str_start, len);
 
                 if (strcmp(value, "true") == 0 ||
                     strcmp(value, "false") == 0) {
                     cfg__lexer_add_token(lexer, CFG_TOKEN_BOOL, value);
-                    continue;
                 } else {
                     cfg__lexer_add_token(lexer, CFG_TOKEN_IDENTIFIER, value);
                 }
+                ungetc(c, stream);
+                continue;
             }
         }
         lexer->column++;
     }
 
     cfg__lexer_add_token(lexer, CFG_TOKEN_EOF, "\0");
+
+    return lexer;
 }
 
 static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
@@ -815,6 +893,7 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
     Cfg_Stack *stack = &lexer->stack;
     Cfg_Variable *ctx = &cfg->global;
     for (size_t i = lexer->cur_token; i < lexer->tokens_len; ++i) {
+        printf("Token %s %lu %lu\n", tokens[i].value, tokens[i].line, tokens[i].column);
         lexer->cur_token = i;
         if (tokens[i].type & expected_token) {
             switch (tokens[i].type) {
@@ -1126,7 +1205,14 @@ Cfg_Error_Type cfg_load_stream(Cfg_Config *cfg, FILE *stream)
 
 Cfg_Error_Type cfg_load_file(Cfg_Config *cfg, const char *path)
 {
-    return 0;
+    FILE *stream = fopen(path, "r");
+    if (!stream) {
+        cfg->err.type = CFG_ERROR_OPEN_FILE;
+        snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Failed to open file: %s", path);
+        return cfg->err.type;
+    }
+    Cfg_Error_Type err = cfg_load_stream(cfg, stream);
+    return err;
 }
 
 Cfg_Variable *cfg_global_context(Cfg_Config *cfg)
