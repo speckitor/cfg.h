@@ -52,6 +52,7 @@ typedef enum {
 typedef enum {
     CFG_ERROR_NONE = 0,
     CFG_ERROR_OPEN_FILE,
+    CFG_ERROR_FILE_TOO_LARGE,
     CFG_ERROR_UNKNOWN_TOKEN,
     CFG_ERROR_UNEXPECTED_TOKEN,
     CFG_ERROR_VARIABLE_REDEFINITION,
@@ -165,6 +166,8 @@ Cfg_Variable *cfg_get_struct_elem(Cfg_Variable *ctx, size_t idx);
 #define INIT_TOKENS_NUM 64
 #define INIT_STRING_SIZE 64
 #define INIT_STACK_SIZE 64
+
+#define FILE_MAX_SIZE 10 * 1024 * 1024
 
 typedef enum {
     // Types with string literal values
@@ -1228,10 +1231,23 @@ Cfg_Error_Type cfg_load_file(Cfg_Config *cfg, const char *path)
     FILE *stream = fopen(path, "r");
     if (!stream) {
         cfg->err.type = CFG_ERROR_OPEN_FILE;
-        snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Failed to open file: %s", path);
+        snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Failed to open file `%s`", path);
         return cfg->err.type;
     }
+
+    long prev = ftell(stream);
+    fseek(stream, 0, SEEK_END);
+    long size = ftell(stream);
+    if (size > FILE_MAX_SIZE) {
+        fclose(stream);
+        cfg->err.type = CFG_ERROR_FILE_TOO_LARGE;
+        snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "File `%s` seems to be really large", path);
+        return cfg->err.type;
+    }
+    fseek(stream, prev, SEEK_SET);
+
     Cfg_Error_Type err = cfg_load_stream(cfg, stream);
+    fclose(stream);
     return err;
 }
 
