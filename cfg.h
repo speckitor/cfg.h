@@ -712,6 +712,7 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
         }
 
         if (c == '/') {
+            c = fgetc(stream);
             lexer->column++;
             if (c == '/') {
                 lexer->comment_eol = true;
