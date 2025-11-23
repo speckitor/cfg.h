@@ -894,7 +894,6 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
     Cfg_Stack *stack = &lexer->stack;
     Cfg_Variable *ctx = &cfg->global;
     for (size_t i = lexer->cur_token; i < lexer->tokens_len; ++i) {
-        printf("Token %s %lu %lu\n", tokens[i].value, tokens[i].line, tokens[i].column);
         lexer->cur_token = i;
         if (tokens[i].type & expected_token) {
             switch (tokens[i].type) {
