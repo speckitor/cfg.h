@@ -81,9 +81,6 @@ struct Cfg_Variable {
 
 typedef struct {
     Cfg_Variable global;
-    char *buffer;
-    FILE *stream;
-    char *path;
     Cfg_Error err;
 } Cfg_Config;
 
@@ -1156,7 +1153,6 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
     return 0;
 }
 
-
 // Public API function definitions
 
 Cfg_Config *cfg_config_init(void)
@@ -1170,9 +1166,6 @@ Cfg_Config *cfg_config_init(void)
     cfg->global.vars_cap = INIT_VARIABLES_NUM;
     cfg->err.type = CFG_ERROR_NONE;
     cfg->err.message[0] = '\0';
-    cfg->buffer = NULL;
-    cfg->stream = NULL;
-    cfg->path = NULL;
     return cfg;
 }
 
