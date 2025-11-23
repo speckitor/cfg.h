@@ -403,7 +403,7 @@ static char *cfg__lexer_parse_string_stream(Cfg_Lexer *lexer, FILE *stream)
     char ch;
     bool backslash = false;
 
-    while (c != '\0' && (c != '"' || backslash)) {
+    while (c != EOF && (c != '"' || backslash)) {
         if (c == '\\') {
             if (backslash) {
                 cfg__string_add_char(&str, &cap, c);
@@ -887,6 +887,7 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
     int type = 0;
     char *name = NULL;
     char *value = NULL;
+    char *tmp_string_buf = NULL;
     Cfg_Token *tokens = lexer->tokens;
     Cfg_Stack *stack = &lexer->stack;
     Cfg_Variable *ctx = &cfg->global;
@@ -906,6 +907,10 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
             case CFG_TOKEN_SEMICOLON:
                 if (name != NULL && value != NULL) {
                     cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                    if (type == CFG_TYPE_STRING && tmp_string_buf != NULL) {
+                        free(tmp_string_buf);
+                        tmp_string_buf = NULL;
+                    };
                     if (cfg->err.type != CFG_ERROR_NONE) {
                         return 1;
                     }
@@ -925,6 +930,10 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
                 };
 
                 cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                if (type == CFG_TYPE_STRING && tmp_string_buf != NULL) {
+                    free(tmp_string_buf);
+                    tmp_string_buf = NULL;
+                };
                 if (cfg->err.type != CFG_ERROR_NONE) {
                     return 1;
                 }
@@ -970,12 +979,16 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
                 break;
             case CFG_TOKEN_RIGHT_BRACKET:
                 if (value != NULL) {
-                    if (type != ctx->vars[0].type) {
+                    if (ctx->vars_len > 0 && type != ctx->vars[0].type) {
                         cfg->err.type = CFG_ERROR_UNEXPECTED_TOKEN;
-                        snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Wrong array member type at line:%lu, column%lu", tokens[i - 1].line, tokens[i - 1].column);
+                        snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Wrong array member type at line:%lu, column:%lu", tokens[i - 1].line, tokens[i - 1].column);
                         return 1;
                     };
                     cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                    if (type == CFG_TYPE_STRING && tmp_string_buf != NULL) {
+                        free(tmp_string_buf);
+                        tmp_string_buf = NULL;
+                    };
                     if (cfg->err.type != CFG_ERROR_NONE) {
                         return 1;
                     }
@@ -994,6 +1007,7 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
                     expected_token = CFG_TOKEN_SEMICOLON;
                     break;
                 }
+                type = CFG_TYPE_ARRAY;
                 break;
             case CFG_TOKEN_LEFT_PARENTHESIS:
                 cfg__stack_add_char(lexer, '(');
@@ -1017,6 +1031,10 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
             case CFG_TOKEN_RIGHT_PARENTHESIS:
                 if (value != NULL) {
                     cfg__context_add_variable(cfg, lexer, ctx, type, name, value);
+                    if (type == CFG_TYPE_STRING && tmp_string_buf != NULL) {
+                        free(tmp_string_buf);
+                        tmp_string_buf = NULL;
+                    };
                     if (cfg->err.type != CFG_ERROR_NONE) {
                         return 1;
                     }
@@ -1035,6 +1053,7 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
                     expected_token = CFG_TOKEN_SEMICOLON;
                     break;
                 }
+                type = CFG_TYPE_LIST;
                 break;
             case CFG_TOKEN_LEFT_CURLY_BRACKET:
                 cfg__stack_add_char(lexer, '{');
@@ -1051,7 +1070,6 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
             case CFG_TOKEN_RIGHT_CURLY_BRACKET:
                 cfg__stack_pop_char(lexer);
                 ctx = ctx->prev;
-                type = 0;
                 name = NULL;
                 value = NULL;
                 switch (cfg__stack_last_char(lexer)) {
@@ -1065,6 +1083,7 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
                     expected_token = CFG_TOKEN_SEMICOLON;
                     break;
                 }
+                type = CFG_TYPE_STRUCT;
                 break;
             case CFG_TOKEN_IDENTIFIER:
                 name = tokens[i].value;
@@ -1118,11 +1137,19 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
             case CFG_TOKEN_STRING:
                 type = CFG_TYPE_STRING;
                 if (prev_token & CFG_TOKEN_STRING) {
-                    size_t new_size = sizeof(char) * (strlen(value) + strlen(tokens[i].value) + 1);
-                    char *tmp = malloc(new_size);
-                    strcpy(tmp, value);
-                    strcat(tmp, tokens[i].value);
-                    value = tmp;
+                    if (tmp_string_buf == NULL) {
+                        size_t new_size = sizeof(char) * (strlen(value) + strlen(tokens[i].value) + 1);
+                        tmp_string_buf = malloc(new_size);
+                        strcpy(tmp_string_buf, value);
+                        strcat(tmp_string_buf, tokens[i].value);
+                        value = tmp_string_buf;
+                    } else {
+                        size_t new_size = sizeof(char) * (strlen(value) + strlen(tokens[i].value) + 1);
+                        tmp_string_buf = realloc(tmp_string_buf, new_size);
+                        strcpy(tmp_string_buf, value);
+                        strcat(tmp_string_buf, tokens[i].value);
+                        value = tmp_string_buf;
+                    }
                 } else {
                     value = tokens[i].value;
                 }
