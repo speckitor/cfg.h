@@ -51,6 +51,7 @@ typedef enum {
 // Error types
 typedef enum {
     CFG_ERROR_NONE = 0,
+    CFG_ERROR_NO_MEMORY,
     CFG_ERROR_OPEN_FILE,
     CFG_ERROR_FILE_TOO_LARGE,
     CFG_ERROR_UNKNOWN_TOKEN,
@@ -254,6 +255,12 @@ static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
     lexer->tokens = malloc(sizeof(Cfg_Token) * INIT_TOKENS_NUM);
     lexer->stack.values = malloc(sizeof(char) * INIT_STACK_SIZE);
 
+    if (!lexer || !lexer->tokens || !lexer->stack.values) {
+        cfg->err.type = CFG_ERROR_NO_MEMORY;
+        sprintf(cfg->err.message, "Failed to allocate memory");
+        return NULL;
+    }
+    
     lexer->cur_token = 0;
     lexer->tokens_len = 0;
     lexer->tokens_cap = INIT_TOKENS_NUM;
@@ -462,6 +469,11 @@ static void cfg__context_add_variable(Cfg_Config *cfg, Cfg_Lexer *lexer, Cfg_Var
     if (ctx->vars_len == ctx->vars_cap) {
         ctx->vars_cap *= 2;
         ctx->vars = realloc(ctx->vars, sizeof(Cfg_Variable) * ctx->vars_cap);
+        if (!ctx->vars) {
+            cfg->err.type = CFG_ERROR_NO_MEMORY;
+            sprintf(cfg->err.message, "Failed to allocate memory");
+            return;
+        }
         for (size_t i = 0; i < ctx->vars_len; ++i) {
             ctx->vars[i].prev = ctx;
         }
@@ -500,6 +512,11 @@ static void cfg__context_add_variable(Cfg_Config *cfg, Cfg_Lexer *lexer, Cfg_Var
     ctx->vars[ctx->vars_len].prev = ctx;
     if (type & CFG_TYPE_STRUCT || type & CFG_TYPE_ARRAY || type & CFG_TYPE_LIST) {
         ctx->vars[ctx->vars_len].vars = malloc(sizeof(Cfg_Variable) * INIT_VARIABLES_NUM);
+        if (!ctx->vars[ctx->vars_len].vars) {
+            cfg->err.type = CFG_ERROR_NO_MEMORY;
+            sprintf(cfg->err.message, "Failed to allocate memory");
+            return;
+        }
         ctx->vars[ctx->vars_len].vars_cap = INIT_VARIABLES_NUM;
         ctx->vars[ctx->vars_len].vars_len = 0;
     } else {
@@ -636,6 +653,11 @@ static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
 
                 size_t len = lexer->ch_current - lexer->str_start;
                 char *value = malloc(sizeof(char) * (len + 1));
+                if (!value) {
+                    cfg->err.type = CFG_ERROR_NO_MEMORY;
+                    sprintf(cfg->err.message, "Failed to allocate memory");
+                    return NULL;
+                }
                 value[len] = '\0';
                 strncpy(value, lexer->str_start, len);
 
@@ -649,6 +671,11 @@ static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
             } else if (*lexer->ch_current == '"') {
                 lexer->str_start = ++lexer->ch_current;
                 char *value = cfg__lexer_parse_string_buffer(lexer);
+                if (!value) {
+                    cfg->err.type = CFG_ERROR_NO_MEMORY;
+                    sprintf(cfg->err.message, "Failed to allocate memory");
+                    return NULL;
+                }
                 cfg__lexer_add_token(lexer, CFG_TOKEN_STRING, value);
                 continue;
             } else {
@@ -678,6 +705,11 @@ static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
 
                 size_t len = lexer->ch_current - lexer->str_start;
                 char *value = malloc(sizeof(char) * (len + 1));
+                if (!value) {
+                    cfg->err.type = CFG_ERROR_NO_MEMORY;
+                    sprintf(cfg->err.message, "Failed to allocate memory");
+                    return NULL;
+                }
                 value[len] = '\0';
                 strncpy(value, lexer->str_start, len);
 
@@ -778,6 +810,11 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                 size_t len = 0;
                 size_t cap = INIT_STRING_SIZE;
                 char *value = malloc(sizeof(char) * cap);
+                if (!value) {
+                    cfg->err.type = CFG_ERROR_NO_MEMORY;
+                    sprintf(cfg->err.message, "Failed to allocate memory");
+                    return NULL;
+                }
                 size_t dots = 0;
 
                 while (isdigit(c) || c == '.') {
@@ -788,6 +825,11 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                     if (len == cap) {
                         cap *= 2;
                         value = realloc(value, sizeof(char) * cap);
+                        if (!value) {
+                            cfg->err.type = CFG_ERROR_NO_MEMORY;
+                            sprintf(cfg->err.message, "Failed to allocate memory");
+                            return NULL;
+                        }
                     }
                     value[len++] = c;
 
@@ -812,6 +854,11 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                 if (len == cap) {
                     cap++;
                     value = realloc(value, sizeof(char) * cap);
+                    if (!value) {
+                        cfg->err.type = CFG_ERROR_NO_MEMORY;
+                        sprintf(cfg->err.message, "Failed to allocate memory");
+                        return NULL;
+                    }
                 }
                 value[len] = '\0';
 
@@ -824,6 +871,11 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                 continue;
             } else if (c == '"') {
                 char *value = cfg__lexer_parse_string_stream(lexer, stream);
+                if (!value) {
+                    cfg->err.type = CFG_ERROR_NO_MEMORY;
+                    sprintf(cfg->err.message, "Failed to allocate memory");
+                    return NULL;
+                }
                 cfg__lexer_add_token(lexer, CFG_TOKEN_STRING, value);
                 lexer->column++;
                 continue;
@@ -831,7 +883,11 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                 size_t len = 0;
                 size_t cap = INIT_STRING_SIZE;
                 char *value = malloc(sizeof(char) * cap);
-
+                if (!value) {
+                    cfg->err.type = CFG_ERROR_NO_MEMORY;
+                    sprintf(cfg->err.message, "Failed to allocate memory");
+                    return NULL;
+                }
                 while (c != ' ' &&
                        c != EOF &&
                        c != '\n' &&
@@ -847,6 +903,11 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                     if (len == cap) {
                         cap *= 2;
                         value = realloc(value, sizeof(char) * cap);
+                        if (!value) {
+                            cfg->err.type = CFG_ERROR_NO_MEMORY;
+                            sprintf(cfg->err.message, "Failed to allocate memory");
+                            return NULL;
+                        }
                     }
                     value[len++] = c;
 
@@ -862,6 +923,11 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                 if (len == cap) {
                     cap++;
                     value = realloc(value, sizeof(char) * cap);
+                    if (!value) {
+                        cfg->err.type = CFG_ERROR_NO_MEMORY;
+                        sprintf(cfg->err.message, "Failed to allocate memory");
+                        return NULL;
+                    }
                 }
                 value[len] = '\0';
 
@@ -895,6 +961,9 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
     Cfg_Stack *stack = &lexer->stack;
     Cfg_Variable *ctx = &cfg->global;
     for (size_t i = lexer->cur_token; i < lexer->tokens_len; ++i) {
+        if (cfg->err.type == CFG_ERROR_NO_MEMORY) {
+            return 1;
+        }
         lexer->cur_token = i;
         if (tokens[i].type & expected_token) {
             switch (tokens[i].type) {
@@ -1140,15 +1209,25 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
             case CFG_TOKEN_STRING:
                 type = CFG_TYPE_STRING;
                 if (prev_token & CFG_TOKEN_STRING) {
-                    if (tmp_string_buf == NULL) {
+                    if (!tmp_string_buf) {
                         size_t new_size = sizeof(char) * (strlen(value) + strlen(tokens[i].value) + 1);
                         tmp_string_buf = malloc(new_size);
+                        if (!tmp_string_buf) {
+                            cfg->err.type = CFG_ERROR_NO_MEMORY;
+                            sprintf(cfg->err.message, "Failed to allocate memory");
+                            return 1;
+                        }
                         strcpy(tmp_string_buf, value);
                         strcat(tmp_string_buf, tokens[i].value);
                         value = tmp_string_buf;
                     } else {
                         size_t new_size = sizeof(char) * (strlen(value) + strlen(tokens[i].value) + 1);
                         tmp_string_buf = realloc(tmp_string_buf, new_size);
+                        if (!tmp_string_buf) {
+                            cfg->err.type = CFG_ERROR_NO_MEMORY;
+                            sprintf(cfg->err.message, "Failed to allocate memory");
+                            return 1;
+                        }
                         strcpy(tmp_string_buf, value);
                         strcat(tmp_string_buf, tokens[i].value);
                         value = tmp_string_buf;
@@ -1189,6 +1268,7 @@ Cfg_Config *cfg_config_init(void)
 {
     Cfg_Config *cfg = malloc(sizeof(Cfg_Config));
     cfg->global.vars = malloc(INIT_VARIABLES_NUM * sizeof(Cfg_Variable));
+    if (!cfg || !cfg->global.vars) return NULL;
     cfg->global.name = NULL;
     cfg->global.value = NULL;
     cfg->global.prev = NULL;
@@ -1201,7 +1281,7 @@ Cfg_Config *cfg_config_init(void)
 
 void cfg_config_deinit(Cfg_Config *cfg)
 {
-    if (cfg == NULL) return;
+    if (!cfg) return;
     cfg__context_free(&cfg->global);
     free(cfg);
 }
@@ -1209,7 +1289,7 @@ void cfg_config_deinit(Cfg_Config *cfg)
 Cfg_Error_Type cfg_load_buffer(Cfg_Config *cfg, char *buffer)
 {
     Cfg_Lexer *lexer = cfg__buffer_tokenize(cfg, buffer);
-    if (lexer == NULL) return cfg->err.type;
+    if (!lexer) return cfg->err.type;
     int res = cfg__parse_tokens(cfg, lexer);
     cfg__lexer_free(lexer);
     if (res != 0) return cfg->err.type;
@@ -1219,7 +1299,7 @@ Cfg_Error_Type cfg_load_buffer(Cfg_Config *cfg, char *buffer)
 Cfg_Error_Type cfg_load_stream(Cfg_Config *cfg, FILE *stream)
 {
     Cfg_Lexer *lexer = cfg__stream_tokenize(cfg, stream);
-    if (lexer == NULL) return cfg->err.type;
+    if (!lexer) return cfg->err.type;
     int res = cfg__parse_tokens(cfg, lexer);
     cfg__lexer_free(lexer);
     if (res != 0) return cfg->err.type;
