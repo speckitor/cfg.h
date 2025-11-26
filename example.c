@@ -60,7 +60,7 @@ void print_vars(Cfg_Config *cfg)
     printf("\ta = %d;\n", structure_a);
 
     int structure_b = cfg_get_int(structure, "b");
-    printf("\tb = %d;\n", structure_a);
+    printf("\tb = %d;\n", structure_b);
 
     // Nested structure
     Cfg_Variable *nested = cfg_get_struct(structure, "nested");
