@@ -113,7 +113,7 @@ size_t cfg_get_context_len(Cfg_Variable *ctx);
 char *cfg_get_name(Cfg_Variable *ctx, size_t idx);
 
 // Get variable type by context and name/index
-// Return CFG_TYPE_NONE on error
+// Return CFG_TYPE_NONE on error (no such variable/element)
 Cfg_Type cfg_get_type(Cfg_Variable *ctx, const char *name);
 Cfg_Type cfg_get_type_elem(Cfg_Variable *ctx, size_t idx);
 
@@ -136,8 +136,8 @@ Cfg_Variable *cfg_get_array(Cfg_Variable *ctx, const char *name);
 Cfg_Variable *cfg_get_list(Cfg_Variable *ctx, const char *name);
 Cfg_Variable *cfg_get_struct(Cfg_Variable *ctx, const char *name);
 
-// Safe verstions of functions above
-// Return 0 on success, 1 on error
+// Get variables from provided context (safe versions)
+// Return CFG_ERROR_NONE (0) on success, Cfg_Error_Type (int) on error
 // To get more information about error see `cfg_get_error_type` and `cfg_get_error_message`
 Cfg_Error_Type cfg_get_int_safe(Cfg_Variable *ctx, const char *name, int *res);
 Cfg_Error_Type cfg_get_double_safe(Cfg_Variable *ctx, const char *name, double *res);
@@ -148,7 +148,7 @@ Cfg_Error_Type cfg_get_list_safe(Cfg_Variable *ctx, const char *name, Cfg_Variab
 Cfg_Error_Type cfg_get_struct_safe(Cfg_Variable *ctx, const char *name, Cfg_Variable **res);
 
 // Get variables by index
-// Return 0/0.0/false/NULL on error
+// Return 0/0.0/false/NULL on error (index out of range)
 int cfg_get_int_elem(Cfg_Variable *ctx, size_t idx);
 double cfg_get_double_elem(Cfg_Variable *ctx, size_t idx);
 bool cfg_get_bool_elem(Cfg_Variable *ctx, size_t idx);
