@@ -576,10 +576,6 @@ static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
                 lexer->ch_current++;
                 lexer->column++;
                 continue;
-            } else {
-                cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
-                snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
-                return NULL;
             }
         }
 
@@ -754,10 +750,6 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                 lexer->comment = true;
                 lexer->column++;
                 continue;
-            } else {
-                cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
-                snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
-                return NULL;
             }
         }
 
