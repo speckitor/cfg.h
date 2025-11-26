@@ -280,7 +280,7 @@ static Cfg_Lexer *cfg__lexer_create(Cfg_Config *cfg)
 static void cfg__lexer_free(Cfg_Lexer *lexer)
 {
     if (lexer->stack.values != NULL) free(lexer->stack.values);
-    for (int i = 0; i < lexer->tokens_len; ++i) {
+    for (size_t i = 0; i < lexer->tokens_len; ++i) {
         if (lexer->tokens[i].type > CFG_TOKEN_EOF && lexer->tokens[i].value != NULL) {
             free(lexer->tokens[i].value);
         }
@@ -576,10 +576,6 @@ static Cfg_Lexer *cfg__buffer_tokenize(Cfg_Config *cfg, char *buffer)
                 lexer->ch_current++;
                 lexer->column++;
                 continue;
-            } else {
-                cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
-                snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
-                return NULL;
             }
         }
 
@@ -754,10 +750,6 @@ static Cfg_Lexer *cfg__stream_tokenize(Cfg_Config *cfg, FILE *stream)
                 lexer->comment = true;
                 lexer->column++;
                 continue;
-            } else {
-                cfg->err.type = CFG_ERROR_UNKNOWN_TOKEN;
-                snprintf(cfg->err.message, ERROR_MESSAGE_LEN, "Unknown token at line:%lu, column:%lu", lexer->line, lexer->column);
-                return NULL;
             }
         }
 
@@ -953,12 +945,11 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
 {
     int prev_token = 0;
     int expected_token = CFG_TOKEN_IDENTIFIER | CFG_TOKEN_EOF;
-    int type = 0;
+    Cfg_Type type = CFG_TYPE_NONE;
     char *name = NULL;
     char *value = NULL;
     char *tmp_string_buf = NULL;
     Cfg_Token *tokens = lexer->tokens;
-    Cfg_Stack *stack = &lexer->stack;
     Cfg_Variable *ctx = &cfg->global;
     for (size_t i = lexer->cur_token; i < lexer->tokens_len; ++i) {
         if (cfg->err.type == CFG_ERROR_NO_MEMORY) {
