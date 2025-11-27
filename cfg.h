@@ -1212,8 +1212,8 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
                             sprintf(cfg->err.message, "Failed to allocate memory");
                             return 1;
                         }
-                        strcpy(tmp_string_buf, value);
-                        strcat(tmp_string_buf, tokens[i].value);
+                        strncpy(tmp_string_buf, value, new_size);
+                        strncat(tmp_string_buf, tokens[i].value, new_size);
                         value = tmp_string_buf;
                     } else {
                         size_t new_size = sizeof(char) * (strlen(value) + strlen(tokens[i].value) + 1);
@@ -1223,8 +1223,7 @@ static int cfg__parse_tokens(Cfg_Config *cfg, Cfg_Lexer *lexer)
                             sprintf(cfg->err.message, "Failed to allocate memory");
                             return 1;
                         }
-                        strcpy(tmp_string_buf, value);
-                        strcat(tmp_string_buf, tokens[i].value);
+                        strncat(tmp_string_buf, tokens[i].value, new_size);
                         value = tmp_string_buf;
                     }
                 } else {
